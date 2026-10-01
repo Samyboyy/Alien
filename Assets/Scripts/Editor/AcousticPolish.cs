@@ -84,8 +84,14 @@ public static class AcousticPolish
     static int Assign(SerializedObject so, string field, string file, bool mono, AudioClipLoadType loadType)
     {
         var p = so.FindProperty(field);
-        if (p.objectReferenceValue != null) return 0; // your choice stays
         string path = $"{Folder}/{file}.wav";
+        if (p.objectReferenceValue != null)
+        {
+            // Your choice of clip stays. Its import settings (mono for 3D sounds, decompress for the ones that are cut) are part of how the game
+            // uses it, and they live in the .meta: on a checkout where those were not committed, this puts them right (it does nothing when they are).
+            if (AssetDatabase.GetAssetPath(p.objectReferenceValue) == path) Prepare(path, mono, loadType);
+            return 0;
+        }
         if (!File.Exists(path)) { Debug.Log($"AudioBank {field}: {file} not in {Folder}; left empty."); return 0; }
         Prepare(path, mono, loadType);
         var clip = AssetDatabase.LoadAssetAtPath<AudioClip>(path);

@@ -42,6 +42,7 @@ public partial class CreatureAI
         lockerOpened = false;
         bool witnessed = witnessedSpot == spot; // the existing observation memory: it saw somebody go in
         lockerInspection.Begin(witnessed ? lockerWitnessedWindup : lockerWindup, lockerOpenSeconds, lockerLookSeconds, lockerCloseSeconds);
+        Decision(DecisionReason.LockerInspected, DecisionEffect.None, spot.name + (witnessed ? " (watched entry, quick)" : ""));
     }
 
     // Per frame while inspecting a locker. True when the inspection is over (the door is released).

@@ -161,6 +161,12 @@ public class PlayerHiding : NetworkBehaviour, IRoundResettable
 
         if (now < nextCheck) return;
         nextCheck = now + 0.25;
+        if (IsHidden)
+        {
+            var claimed = Resolve(lockerRef.Value);
+            if (claimed == null || claimed.OccupantId != OwnerClientId + 1)
+                DevChecks.Report($"player {OwnerClientId} claims a locker that does not claim them (locker {(claimed != null ? claimed.name : "gone")})", this);
+        }
         // Death, escape and the end of the round release the player from the locker (and its occupancy).
         if (IsHidden && (!Alive || !RoundManager.IsActive))
         {

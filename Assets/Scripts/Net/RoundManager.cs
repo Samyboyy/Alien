@@ -25,6 +25,8 @@ public class RoundManager : NetworkBehaviour
 
     public RoundState State => state.Value;
     public static bool IsActive => Instance != null && Instance.state.Value == RoundState.Active;
+    /// <summary>The replicated seed of the current round (hosts and clients). Scenario items derive their resting place from it, so a round is reproducible from this number.</summary>
+    public static int Seed => Instance != null ? Instance.seed.Value : 0;
     public static ShipFlags Flags => Instance != null ? Instance.flags.Value : ShipFlags.None;
 
     void Awake() => Instance = this;
@@ -90,6 +92,7 @@ public class RoundManager : NetworkBehaviour
         var rng = new System.Random(seed.Value);
         flags.Value = ShipFlags.None;
         NoiseSystem.Clear();
+        DevChecks.NewRound();
         foreach (var r in Resettables()) r.ResetForRound(rng);
         foreach (var client in NetworkManager.ConnectedClientsList)
         {

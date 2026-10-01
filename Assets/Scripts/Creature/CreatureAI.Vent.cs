@@ -386,6 +386,7 @@ public partial class CreatureAI
         arrived = false;
         state.Value = CreatureState.Vent;
         reason = $"vent: {why}";
+        Decision(DecisionReason.VentStarted, DecisionEffect.Interrupted, why);
         agent.speed = ResumeSpeed(resume);
         agent.stoppingDistance = 0.4f;
         GoTo(VentNet.entrances[entry].approach.position);
@@ -419,6 +420,7 @@ public partial class CreatureAI
         ventCancelNote = why;
         ventVerdict = $"cancelled before commit: {why}";
         VentLog($"Vent cancelled before commit: {why}");
+        Decision(DecisionReason.VentCancelled, DecisionEffect.Interrupted, why);
         return true;
     }
 
@@ -426,8 +428,8 @@ public partial class CreatureAI
     void AbandonVent(string why)
     {
         CancelVent(why);
-        if (evidenceKind != EvidenceKind.None) EnterSearch(ResumeAfterVent(), $"vent abandoned ({why})");
-        else EnterPatrol($"vent abandoned ({why})");
+        if (evidenceKind != EvidenceKind.None) EnterSearch(ResumeAfterVent(), $"vent abandoned ({why})", DecisionReason.VentAbandoned);
+        else EnterPatrol($"vent abandoned ({why})", DecisionReason.VentAbandoned);
     }
 
     CreatureState ResumeAfterVent()
@@ -554,6 +556,7 @@ public partial class CreatureAI
         {
             ventVerdict = $"stored {kind} ({strength:0.00}) for the next decision";
             VentLog($"Vent evidence stored for the next decision: {kind} {strength:0.00}");
+            Decision(DecisionReason.VentEvidenceStored, DecisionEffect.Stored, $"{kind} {strength:0.00}");
         }
     }
 
@@ -738,6 +741,7 @@ public partial class CreatureAI
         ventReason += " (re-routed)";
         ventRerouteNote = $"Exit {previous} -> Exit {best}, {why}";
         VentLog($"Vent route changed: Exit {previous} -> Exit {best}, {why}");
+        Decision(DecisionReason.VentRerouted, DecisionEffect.Rerouted, ventRerouteNote);
         return true;
     }
 
@@ -861,7 +865,7 @@ public partial class CreatureAI
         {
             ventPostNote = $"went for the evidence ({EvidenceNote()})";
             VentLog($"Vent emerged: {ventPostNote}");
-            EnterSearch(ResumeAfterVent(), "emerged from a vent, heading for the evidence");
+            EnterSearch(ResumeAfterVent(), "emerged from a vent, heading for the evidence", DecisionReason.VentEmerged);
             return;
         }
         ventPostNote = "no evidence left: a heightened search of the room it came out in";
@@ -873,6 +877,7 @@ public partial class CreatureAI
         agent.stoppingDistance = 0.4f;
         arrived = true;
         searchCenter = transform.position;
+        Decision(DecisionReason.VentEmerged, DecisionEffect.None, ventPostNote);
         BeginRoomSearch();
     }
 

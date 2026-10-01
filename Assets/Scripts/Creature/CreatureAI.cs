@@ -153,7 +153,7 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
         {
             transform.position = hit.position;
             agent.enabled = true;
-            EnterPatrol("spawned");
+            EnterPatrol("spawned", DecisionReason.Spawned);
         }
         else
             Debug.LogWarning("Creature: no NavMesh near start position. Run Alien > Rebake Navigation and save the scene.");
@@ -163,6 +163,7 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
     {
         state.OnValueChanged -= OnStateChanged;
         ventPhase.OnValueChanged -= OnVentPhaseChanged;
+        ClearDiagnostics();
         if (sound != null) sound.StopVentAudio(); // no orphaned duct loop or vent cue after a despawn or host shutdown
         agent.enabled = false;
     }
@@ -198,6 +199,7 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
 
         UpdateAlertness();
         TickVocals(); // rare, state-aware, cosmetic
+        DiagnosticsTick(); // dev only: the F8 dump key and the low-cadence invariant check
 
         // Perception at 10 Hz is plenty and keeps raycasts cheap.
         bool tick = (perceptionTimer -= Time.deltaTime) <= 0f;
@@ -226,7 +228,7 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
         }
     }
 
-    void EnterPatrol(string why)
+    void EnterPatrol(string why, DecisionReason code = DecisionReason.PatrolResumed)
     {
         state.Value = CreatureState.Patrol;
         reason = why;
@@ -240,6 +242,7 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
         agent.stoppingDistance = 0.3f;
         hasDestination = false;
         waitTimer = 0f;
+        Decision(code, DecisionEffect.None, why);
     }
 
     void SetEvidence(EvidenceKind kind, Vector3 pos, float strength, ulong emitter, bool crouched = false)
@@ -274,7 +277,7 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
     // Search/Investigate/Pursue differ only in speed and what ends the approach: Pursue keeps chase speed while fresh evidence
     // keeps arriving, Investigate was started by a noise.
     // Also used when evidence changes: the remembered destination is kept, never re-read from a player.
-    void EnterSearch(CreatureState s, string why)
+    void EnterSearch(CreatureState s, string why, DecisionReason code = DecisionReason.Unspecified)
     {
         state.Value = s;
         reason = why;
@@ -287,6 +290,7 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
         arrived = false;
         ClearSearch(false); // new evidence: start the room search afresh on arrival (what was searched stays remembered)
         GoTo(evidencePos);
+        Decision(code, DecisionEffect.None, why);
     }
 
     // Pursuit has run out of steam: same evidence, slower, then the local search.
@@ -295,6 +299,7 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
         state.Value = CreatureState.Search;
         reason = why;
         agent.speed = searchSpeed;
+        Decision(DecisionReason.PursuitExpired, DecisionEffect.None, why);
     }
 
     void EnterChase(NetworkFirstPersonController p, string why)
@@ -307,6 +312,7 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
         agent.stoppingDistance = Mathf.Min(stopDistance, captureDistance * 0.7f);
         SetTarget(p);
         if (fresh) OnChaseStarted(); // a short snarl as a chase starts (CreatureAI.Vocal.cs; its own cooldown)
+        Decision(DecisionReason.DirectSight, DecisionEffect.Interrupted, why);
     }
 
     void SetTarget(NetworkFirstPersonController p)
@@ -423,10 +429,12 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
         }
 
         string why = $"heard {pick.kind} ({pickStrength:0.00})";
+        var heardCode = pickPursued ? DecisionReason.PursuedTrail : pick.token != 0 ? DecisionReason.HeardDecoy : pick.IsPlayerSound ? DecisionReason.HeardPlayer
+            : pick.kind == SoundKind.Impact ? DecisionReason.HeardImpact : DecisionReason.HeardOther;
         if (pickPursued && (state.Value == CreatureState.Pursue || pickStrength >= pursueResumeStrength))
-            EnterSearch(CreatureState.Pursue, why + " from the pursued player");
+            EnterSearch(CreatureState.Pursue, why + " from the pursued player", heardCode);
         else
-            EnterSearch(CreatureState.Investigate, why);
+            EnterSearch(CreatureState.Investigate, why, heardCode);
         // A loud sound far away may be worth a vent trip, if that is clearly quicker than walking.
         if (pick.loudness >= ventMinLoudness) ConsiderVent($"heard {pick.kind} far away", state.Value, evidencePos, EvidenceNote());
         return true;
@@ -478,9 +486,9 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
             {
                 // Target left play: nothing to chase, but it stays alert (patrols heightened). Target merely out of sight:
                 // keep chasing the last CONFIRMED position (evidencePos is only ever written from a confirmed sighting).
-                if (gone) { EnterPatrol("target left play"); return; }
+                if (gone) { EnterPatrol("target left play", DecisionReason.TargetLeftPlay); return; }
                 NoteWitnessedSpot();
-                EnterSearch(CreatureState.Pursue, "lost sight, following last evidence");
+                EnterSearch(CreatureState.Pursue, "lost sight, following last evidence", DecisionReason.LostSight);
                 ConsiderVent("lost the pursued player", CreatureState.Pursue, evidencePos, EvidenceNote());
                 return;
             }
@@ -517,6 +525,8 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
         ResetVent(startPos, roundSeed ^ 0x5EED); // cancels any trip, restores collider, body and agent, clears cadence, history and held sounds
         ResetVocals(roundSeed ^ 0x0C41);
         ResetDecoys(); // no recognised devices, no interest, nothing followed
+        ClearDiagnostics();
+        Decision(DecisionReason.RoundReset, DecisionEffect.None, "round reset");
         sights.Clear(); // every player's awareness and detection history
         lastSightTime = Time.timeAsDouble;
         chaseInspectSpot = null;
@@ -535,7 +545,8 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
         agent.Warp(startPos);
         transform.rotation = startRot;
         GetComponent<NetworkTransform>().Teleport(startPos, startRot, transform.localScale);
-        EnterPatrol("round reset");
+        EnterPatrol("round reset", DecisionReason.RoundReset);
+        CheckResetLeftovers();
     }
 
     public void OnRoundOver() => Stop();
@@ -652,6 +663,7 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
         state.Value = CreatureState.Bash;
         reason = $"blocked by {best.name}";
         agent.ResetPath();
+        Decision(DecisionReason.DoorObstructed, DecisionEffect.Interrupted, best.name);
     }
 
     static Vector3 Flat(Vector3 v) { v.y = 0f; return v; }
@@ -694,6 +706,7 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
         state.Value = resumeState;
         reason = why;
         bashDoor = null;
+        Decision(DecisionReason.DoorResumed, DecisionEffect.None, why);
         if (resumeState == CreatureState.Patrol) { hasDestination = false; return; } // patrol picks its route up again by itself
         agent.speed = SpeedFor(resumeState);
         GoTo(CurrentGoal);
@@ -802,7 +815,7 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
             string dest = evidenceKind == EvidenceKind.None ? "-" : $"({evidencePos.x:0}, {evidencePos.z:0})";
             string snd = lastSound.id == 0 ? "-" : $"{lastSound.kind} {lastSoundStrength:0.00}, {now - lastSoundTime:0.0}s ago";
             string door = bashDoor == null ? "-" : $"{bashDoor.name} {memoProgress:0.0}/{doorWindup:0.0}s";
-            extra = $"\nwhy: {reason}\nsound: {snd}\nevidence: {ev}\ndecoy: {DecoyDebugText()}\nlocker: {LockerDebugText()}\ndest: {dest}\ndoor: {door}\nsearch: {SearchDebugText()}\nrooms: {RoomDebugText()}\nvent: {VentDebugText()}\nsight: {SightDebugText()}";
+            extra = $"\nwhy: {reason}\nsound: {snd}\nevidence: {ev}\ndecoy: {DecoyDebugText()}\nlocker: {LockerDebugText()}\nrecent decisions (F8 writes a file{(lastDumpPath != null ? $", last: {lastDumpPath}" : "")}):{RecentDecisionText(8)}\ndest: {dest}\ndoor: {door}\nsearch: {SearchDebugText()}\nrooms: {RoomDebugText()}\nvent: {VentDebugText()}\nsight: {SightDebugText()}";
         }
         GUI.Label(new Rect(sp.x - 240, Screen.height - sp.y, 520, 300 + 16 * SightDebugLines), $"{state.Value}  alert: {alertLevel.Value}\ntarget: {who}{extra}");
     }

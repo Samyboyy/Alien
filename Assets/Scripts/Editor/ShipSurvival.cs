@@ -200,6 +200,39 @@ public static partial class ShipBuilder
         spot.investigationPoint = points[0];
     }
 
+    /// <summary>
+    /// Gives every furniture hiding place that has lost its inspection points the four candidate openings again (the same ones
+    /// BuildOneHidingPlace makes, derived from its footprint), so the usual validation can keep the usable ones. Spots that still have
+    /// points are untouched. Returns how many spots were repaired.
+    /// </summary>
+    internal static int RepairInspectionPoints()
+    {
+        int repaired = 0;
+        foreach (var spot in Object.FindObjectsByType<HidingSpot>(FindObjectsSortMode.None).Where(h => h.locker == null).OrderBy(h => h.name))
+        {
+            if (spot.inspectPoints != null && spot.inspectPoints.Length > 0 && spot.inspectPoints.All(t => t != null)) continue;
+            bool alongX = spot.footprint.x >= spot.footprint.y;
+            float len = Mathf.Max(spot.footprint.x, spot.footprint.y), depth = Mathf.Min(spot.footprint.x, spot.footprint.y);
+            Vector3 center = spot.transform.position;
+            Vector3 Offset(float u, float v) => center + (alongX ? new Vector3(u, 0.05f, v) : new Vector3(v, 0.05f, u));
+            var points = new List<Transform>();
+            foreach (var (name, u, v) in new[] { ("Inspect +V", 0f, depth * 0.5f + 0.9f), ("Inspect -V", 0f, -(depth * 0.5f + 0.9f)),
+                         ("Inspect +U", len * 0.5f + 0.9f, 0f), ("Inspect -U", -(len * 0.5f + 0.9f), 0f) })
+            {
+                var p = new GameObject(name).transform;
+                p.SetParent(spot.transform);
+                p.position = Offset(u, v);
+                points.Add(p);
+            }
+            spot.inspectPoints = points.ToArray();
+            spot.investigationPoint = points[0];
+            EditorUtility.SetDirty(spot);
+            repaired++;
+            Debug.Log($"{spot.name}: inspection openings restored (it had none).", spot);
+        }
+        return repaired;
+    }
+
     // Each hiding place belongs to the room that contains it, and each room lists its hiding places.
     static void LinkHidingToRooms()
     {
@@ -216,10 +249,12 @@ public static partial class ShipBuilder
     // ---------- Validation (needs the baked NavMesh and the Player prefab) ----------
 
     /// <summary>
-    /// Checks every hiding place against the real player dimensions and the NavMesh, removes inspection points that cannot be used,
-    /// and confirms existing routes still work. Logs a summary; no per-frame output.
+    /// Checks every furniture hiding place against the real player dimensions and the NavMesh, removes inspection points that cannot be used
+    /// (only when <paramref name="trim"/> is true: Alien > Validate Project For Play passes false and changes nothing), and confirms existing
+    /// routes still work. Lockers are skipped: they are enclosed, not low furniture, and ValidateLockers checks them (this check used to judge
+    /// them as tables and would have removed their inspection anchor). Logs a summary; no per-frame output.
     /// </summary>
-    internal static void ValidateSurvival()
+    internal static void ValidateSurvival(bool trim = true)
     {
         Physics.SyncTransforms();
         var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(PrototypeSetup.PrefabPath);
@@ -232,7 +267,7 @@ public static partial class ShipBuilder
         var scratch = new NavMeshPath();
         int ok = 0, problems = 0;
 
-        foreach (var spot in Object.FindObjectsByType<HidingSpot>(FindObjectsSortMode.None).OrderBy(s => s.name))
+        foreach (var spot in Object.FindObjectsByType<HidingSpot>(FindObjectsSortMode.None).Where(s => s.locker == null).OrderBy(s => s.name))
         {
             Vector3 c = spot.LookPoint;
             c.y = 0f;
@@ -249,19 +284,25 @@ public static partial class ShipBuilder
             {
                 if (t == null) continue;
                 Vector3 to = c - new Vector3(t.position.x, 0f, t.position.z);
+                // Reachable = on the NavMesh and connected to the spot's OWN room. (It used to be a complete path from the creature's start, which
+                // fails for every room behind a closed, carved door: the validator then DELETED those rooms' inspection points.)
+                Vector3 origin = spot.room != null && spot.room.searchPoints.Length > 0 && spot.room.searchPoints[0] != null ? spot.room.searchPoints[0].position : start;
                 bool onMesh = NavMesh.SamplePosition(t.position, out var hit, 0.4f, NavMesh.AllAreas)
-                    && NavMesh.CalculatePath(start, hit.position, NavMesh.AllAreas, scratch) && scratch.status == NavMeshPathStatus.PathComplete;
+                    && NavMesh.CalculatePath(origin, hit.position, NavMesh.AllAreas, scratch) && scratch.status == NavMeshPathStatus.PathComplete;
                 Vector3 from = new Vector3(t.position.x, 0f, t.position.z);
                 bool open = !Physics.CapsuleCast(Bottom(from, r), Top(from, crouchH, r), r, to.normalized, to.magnitude, ~0, QueryTriggerInteraction.Ignore);
                 if (onMesh && open) keep.Add(t);
-                else Object.DestroyImmediate(t.gameObject);
+                else if (trim) Object.DestroyImmediate(t.gameObject);
             }
-            spot.inspectPoints = keep.ToArray();
-            spot.investigationPoint = keep.FirstOrDefault();
+            if (trim)
+            {
+                spot.inspectPoints = keep.ToArray();
+                spot.investigationPoint = keep.FirstOrDefault();
+            }
             if (keep.Count == 0) issues.Add("no reachable, open inspection point");
             if (!spot.Qualifies(c, crouchH, true)) issues.Add("a crouched player at the centre does not qualify for the concealment volume");
             if (spot.Qualifies(c, standH, false)) issues.Add("a standing player would qualify for the concealment volume");
-            EditorUtility.SetDirty(spot);
+            if (trim) EditorUtility.SetDirty(spot);
 
             if (issues.Count == 0) { ok++; Debug.Log($"{spot.name}: fits a crouched player, blocks standing, {keep.Count} usable opening(s).", spot); }
             else { problems++; Debug.LogError($"{spot.name}: {string.Join("; ", issues)}", spot); }

@@ -1,0 +1,71 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a58b1e4803c91b943acd8f2c1e8ebd1b, type: 3}
+  m_Name: ShipGenerationProfile
+  m_EditorClassIdentifier: Assembly-CSharp::ShipGenerationProfile
+  settings:
+    minRooms: 24
+    maxRooms: 30
+    deckCount: 1
+    maxDegree: 4
+    minLoops: 3
+    minRouteLength: 10
+    minRoutePerSector: 2
+    minNonTerminalRooms: 12
+    minSideBranches: 4
+    maxBranchDepth: 2
+    minSpecialised: 4
+    maxSpecialised: 8
+    minEscapePodSeparation: 5
+    minBridgeEngineeringDistance: 7
+    bridgeMaxRoomsFurther: 3
+    requireSectorRedundancy: 1
+    minLoopSpan: 3
+    maxLoopSpan: 6
+    routeShare: 0.5
+    maxAttempts: 200
+  rooms:
+  - {fileID: 11400000, guid: 4c09f437c4bdee34a81295553097adea, type: 2}
+  - {fileID: 11400000, guid: 9c0a26fc2f2b5ac47a3b191132ce14b0, type: 2}
+  - {fileID: 11400000, guid: 80d91efee0c70a24e977cf80e04a8ff1, type: 2}
+  - {fileID: 11400000, guid: 8e569184f4ebbce4c8abbeaed2cc2bd2, type: 2}
+  - {fileID: 11400000, guid: c8a43fd42a3c3394eb87b79304b001aa, type: 2}
+  - {fileID: 11400000, guid: 5d97353bebff9214a9812ad18de6661d, type: 2}
+  - {fileID: 11400000, guid: b5818b9353c9fe84b9e474bcb617e4e9, type: 2}
+  - {fileID: 11400000, guid: eb76149dcaebbd24db98865a8d92935b, type: 2}
+  - {fileID: 11400000, guid: 521aef46f8a40e140a2ab66b7f09692e, type: 2}
+  - {fileID: 11400000, guid: 725e97e3835219745b7a925008ae1559, type: 2}
+  - {fileID: 11400000, guid: 1335c3c3db361f04e8eb5ae90e7d3f08, type: 2}
+  - {fileID: 11400000, guid: 371c41e67f731d042885fda580c24298, type: 2}
+  - {fileID: 11400000, guid: a990dd699a18c0c47b1c5a62e8a8d5dc, type: 2}
+  - {fileID: 11400000, guid: 2cd859bed604e26418e57181d74eb6d7, type: 2}
+  - {fileID: 11400000, guid: dd72b29c26321804bb44db55e7b0ff31, type: 2}
+  - {fileID: 11400000, guid: 997267c47fae93a4694194fad6d5d542, type: 2}
+  - {fileID: 11400000, guid: b9e74b750511f914892d469773aab669, type: 2}
+  - {fileID: 11400000, guid: 7e949a2598385384caf3dabffd7feb55, type: 2}
+  - {fileID: 11400000, guid: cbc8dbd7a623db84c8a30f58cad9658e, type: 2}
+  - {fileID: 11400000, guid: 5631066fe1bff044a9fc3a1a9b3a6eed, type: 2}
+  - {fileID: 11400000, guid: ee548b7598642d843b84238448493ad7, type: 2}
+  - {fileID: 11400000, guid: 09d4c8e2f8ea14a4c81b6532f0324572, type: 2}
+  - {fileID: 11400000, guid: cea7c1e272df1604aa687a13cf8992d4, type: 2}
+  - {fileID: 11400000, guid: eacda4c0919964548b7b26ca089a2857, type: 2}
+  - {fileID: 11400000, guid: 3503102cb1ea29d4bbe22ec86f61c213, type: 2}
+  - {fileID: 11400000, guid: fac28c091ff994c4ba287cd2c8ae5407, type: 2}
+  - {fileID: 11400000, guid: 379baf6fc13473b4398fca1b6d4a71ad, type: 2}
+  - {fileID: 11400000, guid: 6e78d81aa00d184408f8b07a4433f337, type: 2}
+  - {fileID: 11400000, guid: 7cf133ee15636e44d990cf7e9271af02, type: 2}
+  - {fileID: 11400000, guid: 73e7a28d46df6ef44a91102ce4cfd2ff, type: 2}
+  - {fileID: 11400000, guid: 287cfddd5de4e3546bacf24e0f8cb82c, type: 2}
+  - {fileID: 11400000, guid: 539947565d6eb934ea123796049f04a2, type: 2}
+  - {fileID: 11400000, guid: a01cbb834cc07d24cb2f6a5aab827b7c, type: 2}
+  - {fileID: 11400000, guid: 419da3fbeb9830c4eb1ba7d3be04efc3, type: 2}
+  - {fileID: 11400000, guid: d2705d319994e814c97e7abb95f9342f, type: 2}

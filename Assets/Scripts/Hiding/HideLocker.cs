@@ -236,8 +236,9 @@ public class HideLocker : NetworkBehaviour, IInteractable, IRoundResettable
         nextCheck = now + 0.25;
         if (!occupancy.Occupied) return;
         // The occupant must still be a connected living player in a running round, else they are released.
-        bool ok = RoundManager.IsActive && NetworkManager.ConnectedClients.TryGetValue(occupancy.Occupant - 1, out var c) && c.PlayerObject != null
-            && c.PlayerObject.TryGetComponent(out PlayerLife life) && life.IsAlive;
+        bool exists = NetworkManager.ConnectedClients.TryGetValue(occupancy.Occupant - 1, out var c) && c.PlayerObject != null;
+        bool ok = RoundManager.IsActive && exists && c.PlayerObject.TryGetComponent(out PlayerLife life) && life.IsAlive;
+        if (!exists) DevChecks.Report($"{name} claimed occupant player {occupancy.Occupant - 1}, who is not connected (their despawn should have released it)", this);
         if (!ok) ReleaseOccupant();
     }
 

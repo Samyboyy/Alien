@@ -85,11 +85,11 @@ public partial class CreatureAI
             evidenceEmitter = s.emitter;
             evidenceCrouched = s.crouched;
             evidenceTime = s.time; // its age is kept: old evidence is not refreshed by having been interrupted
-            EnterSearch(CreatureState.Search, why + ", resuming earlier evidence");
+            EnterSearch(CreatureState.Search, why + ", resuming earlier evidence", DecisionReason.DecoyRecognised);
             return;
         }
         alertness = Mathf.Max(alertness, 0.5f);
-        EnterPatrol(why);
+        EnterPatrol(why, DecisionReason.DecoyRecognised);
     }
 
     void ResetDecoys()

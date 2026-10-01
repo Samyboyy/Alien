@@ -1,0 +1,62 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f723edf1093e7f849936afd783d2274b, type: 3}
+  m_Name: GreyboxLibrary
+  m_EditorClassIdentifier: Assembly-CSharp::GreyboxLibrary
+  rooms:
+  - {fileID: 7725793319666424396, guid: 5b515debbf45af1409e9535683bb55a8, type: 3}
+  - {fileID: 7878826118876062349, guid: f7d62d2ad77a2114290244474522c628, type: 3}
+  - {fileID: 1200341440842105821, guid: ecde7e623582cdb41b0a45d2ea8c0016, type: 3}
+  - {fileID: 5670142201814340104, guid: 7f23f42ae7380a84e99fc2969e0f8c1a, type: 3}
+  - {fileID: 6446024696870468113, guid: 59b13b6c41c3ad044a1bf65e9b45590e, type: 3}
+  - {fileID: 1892280256973890618, guid: c3e4402e1ab625044be61d645753fcf8, type: 3}
+  - {fileID: 2634637464738913047, guid: dc0c6428e5aedd942bcdcd76a9073a96, type: 3}
+  - {fileID: 4315041492144353850, guid: 7f852c2ead1b6b34ebc6b4cd321b36b2, type: 3}
+  - {fileID: 6804053861695059726, guid: 487bd5da4632378408a1f1d4bb8d3ba2, type: 3}
+  - {fileID: 5460185102548900805, guid: 7339f00c256940a44bd150c439cfef13, type: 3}
+  - {fileID: 3576137077751752742, guid: 00762abe4ceaea24989b678ff650aa2a, type: 3}
+  - {fileID: 5345462450737585143, guid: ecb8d45a2ee59b346af8864cdcccaf5b, type: 3}
+  - {fileID: 8651279258292926617, guid: b454ae719abfcb24194ed49ffab42ee9, type: 3}
+  - {fileID: 24902844945053119, guid: b011931a7b5698a4890c9b43da46f15b, type: 3}
+  - {fileID: 3325422163304108650, guid: aa4b05de10320164d8f25cc9520b191a, type: 3}
+  - {fileID: 4702108045706429162, guid: aa3a013b0a1d6a347bb845dd38e0e4ad, type: 3}
+  - {fileID: 4797559879464090998, guid: c65bea3b961ea904284701772c81e5b3, type: 3}
+  - {fileID: 3447676085442272961, guid: 7720510ca179ff744b797a3ed5291f99, type: 3}
+  - {fileID: 8609432580494255972, guid: 3ce0f91d3052beb4bb97f3ca702cb385, type: 3}
+  - {fileID: 5307882829064787052, guid: ed567b2241178c74ca9f91594f449a40, type: 3}
+  - {fileID: 8470890097612010157, guid: 7734c621c8cc8cf46ae65c1009d593be, type: 3}
+  - {fileID: 5767870001090500491, guid: df636ae0df9666d4bbd2e3ab63ed2655, type: 3}
+  - {fileID: 127047983904432188, guid: d2091dcd992fc6042a7b02c9cd01add1, type: 3}
+  - {fileID: 5931040805965122649, guid: 2e66b8b31467fc748807101a0b1a347f, type: 3}
+  - {fileID: 6366852869016871025, guid: 51eda48f2d1aa344fbc1744cba66f925, type: 3}
+  - {fileID: 5529518620139888446, guid: af972f264b3b70d45abc0b082a2cd306, type: 3}
+  - {fileID: 3430071989724485935, guid: b8af75d8d3b78854ebf2a1b37b106612, type: 3}
+  - {fileID: 8701460318255818277, guid: 8d2961c792782da48991cfa3df2d3e26, type: 3}
+  - {fileID: 3209820561665394828, guid: 2006f233ee9140a4a9dad5db46da5e6f, type: 3}
+  - {fileID: 2760834067228160078, guid: ffb4a28fb82a9914c95849435ee156f3, type: 3}
+  - {fileID: 7205680159104312440, guid: e6b914fa518b24a43a31bfe25787c99f, type: 3}
+  - {fileID: 1464885219731306277, guid: 00483907727c8b5458e5369e8cf917a6, type: 3}
+  - {fileID: 3247433907058283737, guid: 31389d7e26e927245998eed8ceb64168, type: 3}
+  - {fileID: 3804797079280266700, guid: ea586a397f631f84b9ddfb05331be56e, type: 3}
+  - {fileID: 622943422504149339, guid: cd376f82f7d53194293d5ed0fa220e12, type: 3}
+  - {fileID: 670089570569116036, guid: 62a9d04ef147e2c46ac279135f1b2860, type: 3}
+  - {fileID: 8994253905144641900, guid: 8b31acbec2b833445930d13dee6af787, type: 3}
+  - {fileID: 2480330126575850504, guid: 6ffaacac0e86dba4883bd69c7d60ba8a, type: 3}
+  - {fileID: 5737329255163662874, guid: 24a7b68b94228d742a0df9b47af77e28, type: 3}
+  - {fileID: 3975839831059075203, guid: fd1bfd56576f56d4ba7130f4bbad32c0, type: 3}
+  - {fileID: 5173829623627344009, guid: d87ab4ef6e4b76c459acf3127015f9bb, type: 3}
+  corridorStraight: {fileID: 6107778542928105696, guid: 7c545b899fcd76543a0fb21f630179f0, type: 3}
+  corridorCorner: {fileID: 2834902674780200500, guid: 24cd7f4cd412d904fa82f71003eb3b3f, type: 3}
+  corridorTee: {fileID: 7171125659480137615, guid: bb78057d431be454c96b0171cba182a6, type: 3}
+  corridorCross: {fileID: 7790895756839063942, guid: 5b7603462740b4248aa84b1febd661de, type: 3}
+  corridorDeadEnd: {fileID: 5133820337414122633, guid: 8ae91cbbe251c724586c866beeb53f7f, type: 3}
+  wallSeal: {fileID: 1578452446135956958, guid: a7b5b10e07ba18144a72eb7eabfbef6b, type: 3}

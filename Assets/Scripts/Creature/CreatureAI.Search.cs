@@ -233,6 +233,7 @@ public partial class CreatureAI
     {
         targetSpot = spot;
         GoTo(InspectPosition(spot));
+        if (spot.locker != null) Decision(DecisionReason.LockerSelected, DecisionEffect.None, spot.name + (witnessedSpot == spot ? " (watched entry)" : ""));
     }
 
     // The opening to look in from that is nearest to us (the spot owns its opening information).
@@ -359,7 +360,7 @@ public partial class CreatureAI
     void FinishSearch(string why)
     {
         searchPhase = SearchPhase.Done;
-        EnterPatrol(why + ", heightened patrol");
+        EnterPatrol(why + ", heightened patrol", DecisionReason.SearchExpired);
     }
 
     // ---------- Debug ----------

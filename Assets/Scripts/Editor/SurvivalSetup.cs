@@ -58,8 +58,9 @@ public static class SurvivalSetup
     }
 
     /// <summary>
-    /// Menu: Alien > Update Hiding Volumes. Configures the concealment volume of every existing hiding place that has none, in the
-    /// Ship scene. Nothing is rebuilt or rebaked; configured spots and all other objects are left untouched.
+    /// Menu: Alien > Update Hiding Volumes. Configures the concealment volume of every existing hiding place that has none, and restores the
+    /// inspection openings of furniture that lost them, in the Ship scene. Nothing is rebuilt or rebaked; configured spots and all other
+    /// objects are left untouched.
     /// </summary>
     [MenuItem("Alien/Update Hiding Volumes")]
     static void UpdateHidingVolumes()
@@ -67,7 +68,7 @@ public static class SurvivalSetup
         if (!File.Exists(ScenePath)) { Debug.LogError("Ship scene missing. Run Alien > Build Ship Scene first."); return; }
         if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo()) return;
         var scene = EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
-        int done = ShipBuilder.ConfigureHidingVolumes();
+        int done = ShipBuilder.ConfigureHidingVolumes() + ShipBuilder.RepairInspectionPoints(); // volumes, and openings that an old validation removed
         if (done == 0) return; // nothing changed: leave the scene untouched
         ShipBuilder.ValidateSurvival();
         EditorSceneManager.MarkSceneDirty(scene);

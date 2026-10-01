@@ -207,7 +207,7 @@ public partial class CreatureAI
         // Before it has committed to a vent, a hiding place it watched somebody enter always cancels the trip; in the duct it cannot see at all.
         if (state.Value == CreatureState.Vent && !CancelVentAttemptForEvidence("watched a player enter a hiding place")) return;
         SetEvidence(EvidenceKind.Sight, s.spot.LookPoint, 0.7f, p.OwnerClientId, true);
-        EnterSearch(CreatureState.Investigate, $"saw a player enter {s.spot.name}");
+        EnterSearch(CreatureState.Investigate, $"saw a player enter {s.spot.name}", DecisionReason.WatchedHideEntry);
     }
 
     // The spot a lost chase target was WATCHED entering, from memory only (never from where they are now).
@@ -272,7 +272,7 @@ public partial class CreatureAI
         var s = Sight(p.OwnerClientId);
         p.GetComponent<PlayerLife>().Kill(ReasonFor(s));
         sights.Remove(p.OwnerClientId); // a dead player's awareness and history are gone
-        EnterSearch(CreatureState.Search, "captured a player"); // keeps hunting: reacquires any other recognised player
+        EnterSearch(CreatureState.Search, "captured a player", DecisionReason.Captured); // keeps hunting: reacquires any other recognised player
     }
 
     // ---------- Debug ----------

@@ -303,6 +303,7 @@ public partial class CreatureAI
         chaseInspectSpot = null;
         agent.speed = searchSpeed;
         agent.stoppingDistance = 0.4f;
+        Decision(DecisionReason.RoomHunt, DecisionEffect.None, why);
         evidencePos = target.searchPoints.Length > 0 && target.searchPoints[0] != null ? target.searchPoints[0].position : target.transform.position; // only used to order points; there is no evidence kind
         arrived = true;
         searchCenter = transform.position;

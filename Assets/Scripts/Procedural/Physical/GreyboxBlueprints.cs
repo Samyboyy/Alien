@@ -106,6 +106,13 @@ public static class GreyboxBlueprints
             .Box(Pod, "Boarding Plate", 3.0f, 3.2f, 6.0f, 3.2f, 0.05f) // the pod's open interior: walkable, the EscapePod boarding box stands on it
             .Console(AnchorSemantic.PodLaunchConsole, 9.6f, 5.0f).Console(AnchorSemantic.PodBerth, 6.0f, 4.8f));
 
+        // Escape Access: the evacuation lobby in front of a pod bay. A straight room (ship side west, pod side east) with emergency lockers, a
+        // status console and room for a door at each end.
+        Add(B("escape_access", RoomCategory.EscapeAccess, "a", 4, 3, Small).Socket(W, 1).Socket(E, 1)
+            .Row(Locker, "Evacuation Locker", 1.2f, 5.0f, 3, 0.8f, 0.6f, 1.9f, 1.2f, 0f).Sem(AnchorSemantic.EmergencyWallMount, cN | cM | cT | cK, Sto, 1f, true, TEmg, ItemClassMask.None, 3)
+            .Box(Console, "Evacuation Status Panel", 7.4f, 0.4f, 0.3f, 1.2f, 0.8f, 1.0f)
+            .Console(AnchorSemantic.ObjectiveConsole, 6.5f, 4.6f));
+
         // ---------- Optional specialised ----------
 
         Add(B("camera_control", RoomCategory.CameraControl, "a", 4, 3, Small).Socket(W, 1).Socket(E, 1)

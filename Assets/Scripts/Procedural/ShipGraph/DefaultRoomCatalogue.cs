@@ -45,13 +45,14 @@ public static class DefaultRoomCatalogue
         list.Add(bridge);
 
         var security = Room("security", "Security", RoomCategory.Security, M, SectorMask.Forward | SectorMask.Central, 1, 1, Any, 1, 4, 1f, Rich);
-        security.preferredNeighbours = C(RoomCategory.Bridge, RoomCategory.CameraControl);
+        security.preferredNeighbours = C(RoomCategory.Bridge, RoomCategory.CameraControl, RoomCategory.EscapeAccess);
         security.closeTo = C(RoomCategory.Bridge);
         security.closeToDistance = 3;
         list.Add(security);
 
         var medbay = Room("medbay", "Medbay", RoomCategory.Medbay, M, SectorMask.Central | SectorMask.Crew, 1, 1, LeafOrPass, 1, 2, 1f, Rich);
-        medbay.preferredNeighbours = C(RoomCategory.Quarantine, RoomCategory.Laboratory, RoomCategory.CrewQuarters);
+        medbay.preferredNeighbours = C(RoomCategory.Quarantine, RoomCategory.Laboratory, RoomCategory.CrewQuarters, RoomCategory.CorridorJunction);
+        medbay.placement = PlacementPreference.Transit; // reachable from the main way, not tucked away
         medbay.forbiddenNeighbours = C(RoomCategory.WasteProcessing);
         list.Add(medbay);
 
@@ -60,6 +61,7 @@ public static class DefaultRoomCatalogue
         mess.forbiddenNeighbours = C(RoomCategory.WasteProcessing);
         mess.closeTo = C(RoomCategory.CrewQuarters);
         mess.closeToDistance = 2;
+        mess.closeToStrict = true; // the crew eat near where they sleep: a hard rule
         list.Add(mess);
 
         var quarters = Room("crew_quarters", "Crew Quarters", RoomCategory.CrewQuarters, M, SectorMask.Crew, 1, 2, LeafOrPass, 1, 2);
@@ -69,7 +71,7 @@ public static class DefaultRoomCatalogue
 
         var engineering = Room("engineering", "Engineering", RoomCategory.Engineering, M, SectorMask.Industrial, 1, 1, LeafOrPass, 1, 2, 1f, RoomFeatures.All);
         engineering.minSpawnDistance = 3;
-        engineering.preferredNeighbours = C(RoomCategory.PowerControl, RoomCategory.CoolantControl);
+        engineering.preferredNeighbours = C(RoomCategory.PowerControl, RoomCategory.CoolantControl, RoomCategory.UtilityRoom, RoomCategory.Workshop);
         engineering.forbiddenNeighbours = C(RoomCategory.PlayerStart);
         list.Add(engineering);
 
@@ -81,7 +83,7 @@ public static class DefaultRoomCatalogue
         list.Add(power);
 
         var cargo = Room("cargo_bay", "Cargo Bay", RoomCategory.CargoBay, M, SectorMask.Industrial, 1, 1, Route, 2, 4, 1f, Rich);
-        cargo.preferredNeighbours = C(RoomCategory.Workshop, RoomCategory.SecondaryCargoHold, RoomCategory.EquipmentStore);
+        cargo.preferredNeighbours = C(RoomCategory.Workshop, RoomCategory.SecondaryCargoHold, RoomCategory.EquipmentStore, RoomCategory.SmallStorage);
         list.Add(cargo);
 
         var workshop = Room("workshop", "Workshop", RoomCategory.Workshop, M, SectorMask.Industrial, 1, 1, Any, 1, 3);
@@ -96,7 +98,16 @@ public static class DefaultRoomCatalogue
         pod.minSpawnDistance = 3;
         pod.spreadAcrossSectors = true;
         pod.forbiddenNeighbours = C(RoomCategory.PlayerStart, RoomCategory.EscapePodBay);
+        pod.onlyNeighbours = C(RoomCategory.EscapeAccess); // a pod bay is reached through its own evacuation access, never straight from a ship room
         list.Add(pod);
+
+        // The evacuation access in front of each pod bay: ship sector -> Escape Access -> Escape Pod Bay.
+        var access = Room("escape_access", "Escape Access", RoomCategory.EscapeAccess, M, SectorMask.Central | SectorMask.Industrial, 2, 2, Pass, 2, 2, 1f,
+            RoomFeatures.Doors | RoomFeatures.Vents | RoomFeatures.Objectives | RoomFeatures.ItemAnchors);
+        access.spreadAcrossSectors = true;
+        access.requiredNeighbours = C(RoomCategory.EscapePodBay);
+        access.forbiddenNeighbours = C(RoomCategory.PlayerStart);
+        list.Add(access);
 
         // ---------- Optional specialised ----------
         RoomSpec Spec(string id, string name, RoomCategory cat, SectorMask sectors, GraphRoles roles, int maxConn, float weight, params RoomCategory[] preferred)
@@ -106,9 +117,9 @@ public static class DefaultRoomCatalogue
             list.Add(r);
             return r;
         }
-        Spec("camera_control", "Camera Control", RoomCategory.CameraControl, SectorMask.Forward | SectorMask.Central, LeafOrPass, 2, 1f, RoomCategory.Security);
+        Spec("camera_control", "Camera Control", RoomCategory.CameraControl, SectorMask.Forward | SectorMask.Central, LeafOrPass, 2, 1f, RoomCategory.Security).placement = PlacementPreference.Central;
         Spec("communications", "Communications", RoomCategory.Communications, SectorMask.Forward, LeafOrPass, 2, 1f, RoomCategory.Bridge, RoomCategory.ServerRoom);
-        Spec("equipment_store", "Equipment Store", RoomCategory.EquipmentStore, SectorMask.Central | SectorMask.Industrial, Leaf, 1, 1f, RoomCategory.CargoBay, RoomCategory.Workshop);
+        Spec("equipment_store", "Equipment Store", RoomCategory.EquipmentStore, SectorMask.Central | SectorMask.Industrial, Leaf, 1, 1f, RoomCategory.CargoBay, RoomCategory.Workshop).placement = PlacementPreference.SideBranch;
         Spec("server_room", "Server Room", RoomCategory.ServerRoom, SectorMask.Forward | SectorMask.Central, Leaf, 1, 0.8f, RoomCategory.Communications, RoomCategory.CameraControl);
         Spec("air_processing", "Air Processing", RoomCategory.AirProcessing, SectorMask.Central | SectorMask.Crew | SectorMask.Industrial, LeafOrPass, 2, 1f, RoomCategory.MaintenanceRoom);
         Spec("coolant_control", "Coolant Control", RoomCategory.CoolantControl, SectorMask.Industrial, LeafOrPass, 2, 0.9f, RoomCategory.Engineering, RoomCategory.MachineryChamber);
@@ -132,7 +143,7 @@ public static class DefaultRoomCatalogue
             list.Add(r);
             return r;
         }
-        Filler("small_storage", "Small Storage", RoomCategory.SmallStorage, SectorMask.Any, Leaf, 1, 1, 3, 0.8f);
+        Filler("small_storage", "Small Storage", RoomCategory.SmallStorage, SectorMask.Any, Leaf, 1, 1, 3, 0.8f).placement = PlacementPreference.SideBranch;
         Filler("utility_room", "Utility Room", RoomCategory.UtilityRoom, SectorMask.Any, LeafOrPass, 1, 2, 3, 1f);
         Filler("maintenance_room", "Maintenance Room", RoomCategory.MaintenanceRoom, SectorMask.Any, Any, 1, 3, 3, 1.2f);
         Filler("corridor_junction", "Corridor Junction", RoomCategory.CorridorJunction, SectorMask.Any, Route, 2, 4, 6, 2f);
@@ -144,6 +155,7 @@ public static class DefaultRoomCatalogue
         Filler("service_tunnel", "Service Tunnel", RoomCategory.ServiceTunnel, SectorMask.Any, Pass, 2, 2, 3, 1f);
         var lobby = Filler("vertical_lobby", "Future Vertical-Connection Lobby", RoomCategory.VerticalLobby, SectorMask.Central | SectorMask.Crew, Route, 2, 4, 1, 0.3f);
         lobby.deck = -1; // a future lift or stair lobby may sit on any deck
+        lobby.requiresVerticalConnection = true; // a functional link between decks: never on a single-deck ship
 
         return list;
     }

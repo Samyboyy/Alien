@@ -14,6 +14,11 @@ public sealed class EscapePlan
     public readonly List<(int edge, OptionKind easiest)> gates = new();
     public int hops;
     public bool loud;
+    /// <summary>Route pressure (see RoutePressure); 0 until assessed.</summary>
+    public float pressure;
+    public int loudActions, stages;
+    public readonly List<(string what, float value)> breakdown = new();
+    public readonly List<string> requirements = new();
 
     /// <summary>What the plan costs, not where it is: power, noise and the kinds of obstacle on the way. Two plans with the same signature are not a choice.</summary>
     public string Signature => $"{(needsPower ? "needs power" : "no power")}, {(loud ? "loud" : "quiet")}, obstacles [{string.Join("+", gates.Select(x => x.easiest.ToString()).OrderBy(x => x, System.StringComparer.Ordinal))}]";
@@ -114,14 +119,17 @@ public static class ScenarioSolver
         {
             changed = false;
             stage++;
-            var keyPlan = Find(ItemKind.Keycard);
-            if (!keycard && keyPlan != null && AllReachable(keyPlan)) { keycard = true; changed = true; res.events.Add(("keycard obtainable", stage)); }
-            var fusePlan = Find(ItemKind.Fuse);
-            if (!fuseFetched && fusePlan != null && AllReachable(fusePlan)) { fuseFetched = true; changed = true; res.events.Add(("fuse obtainable", stage)); }
-            if (fuseFetched && !fuseFitted && NodeOf(ConsoleRole.FuseSocket, out int socket) && reach[socket]) { fuseFitted = true; changed = true; res.events.Add(("fuse fitted (power chain step 1)", stage)); }
-            if (fuseFitted && !power && NodeOf(ConsoleRole.Generator, out int gen) && reach[gen]) { power = true; changed = true; res.events.Add(("power restored (generator running)", stage)); }
+            // Everything this pass may do depends only on the state at its start, so the pass count is the real depth of the dependency chain
+            // (fetch the fuse, fit it, restart the generator, open the powered door...), which is what the stage report shows.
+            bool keycard0 = keycard, fuseFetched0 = fuseFetched, fuseFitted0 = fuseFitted;
             foreach (var gate in sc.gates)
                 if (!openGate.Contains(gate.edge) && Passable(gate.edge)) { openGate.Add(gate.edge); changed = true; res.events.Add(($"door on edge {gate.edge} ({g.edges[gate.edge].id}) can be opened", stage)); }
+            var keyPlan = Find(ItemKind.Keycard);
+            if (!keycard0 && keyPlan != null && AllReachable(keyPlan)) { keycard = true; changed = true; res.events.Add(("keycard obtainable", stage)); }
+            var fusePlan = Find(ItemKind.Fuse);
+            if (!fuseFetched0 && fusePlan != null && AllReachable(fusePlan)) { fuseFetched = true; changed = true; res.events.Add(("fuse obtainable", stage)); }
+            if (fuseFetched0 && !fuseFitted0 && NodeOf(ConsoleRole.FuseSocket, out int socket) && reach[socket]) { fuseFitted = true; changed = true; res.events.Add(("fuse fitted (power chain step 1)", stage)); }
+            if (fuseFitted0 && !power && NodeOf(ConsoleRole.Generator, out int gen) && reach[gen]) { power = true; changed = true; res.events.Add(("power restored (generator running)", stage)); }
             if (opt.useOptionalItems)
                 foreach (var it in sc.items.Where(i => i.optional && !itemOk.Contains(i.id)))
                     if (AllReachable(it)) { itemOk.Add(it.id); changed = true; res.events.Add(($"optional {it.id} obtainable", stage)); }
@@ -129,7 +137,7 @@ public static class ScenarioSolver
             Flood();
             if (reach.Count(r => r) != before) changed = true;
         }
-        res.stages = stage;
+        res.stages = System.Math.Max(0, stage - 1); // the last pass changed nothing
         for (int i = 0; i < n; i++)
         {
             if (stageOf[i] >= 0) res.roomStage[i] = stageOf[i];

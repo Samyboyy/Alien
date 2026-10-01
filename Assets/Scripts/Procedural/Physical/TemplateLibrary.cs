@@ -48,7 +48,7 @@ public sealed class TemplateLibrary
             }
         }
         foreach (var t in All)
-            if (!catalogue.Any(s => s.id == t.definitionId)) list.Add($"variant '{t.id}' belongs to unknown definition '{t.definitionId}'");
+            if (!catalogue.Any(s => s.id == t.definitionId)) list.Add($"variant '{t.id}' belongs to unknown definition '{t.definitionId}' (run Alien > Procedural Ship > Create Or Repair Room Definitions)");
         return list;
     }
 }

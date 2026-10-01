@@ -25,11 +25,15 @@ public sealed class ShipGraphResult
 ///   2. places them in sectors (bow to stern: Forward, Central, Crew, Industrial), balancing the sectors and spreading rooms that ask for it;
 ///   3. splits each sector into the primary route and its side rooms, and orders the route: the Bridge's host at the forward end, the
 ///      spawn at the aft end of the crew sector, a junction-capable room (Power Control by preference) at the stern;
-///   4. adds overlapping loops along the route (a chord every few rooms, through a structural connector room where one is free), so no single
-///      room can cut the ship in two;
-///   5. hangs the remaining rooms off the route as side branches (at most two deep), honouring capacities, forbidden and preferred
-///      neighbours, spawn distances, escape-pod separation and the "close to" rules;
-///   6. validates the result with ShipGraphValidator.
+///   4. reserves the critical structure before anything else can use it: a socket at each end of the route for the Bridge and
+///      Engineering, and one route room per escape branch (Escape Access -> Escape Pod Bay), chosen at random among the suitable ones;
+///   5. adds overlapping loops along the route (a chord every few rooms, through a structural connector room where one is free), so no single
+///      room can cut the ship in two; a chord that would bring the Bridge too close to the spawn or to Engineering is not used;
+///   6. builds the reserved escape branches, then hangs the remaining rooms off the route as side branches (at most two deep), honouring
+///      capacities, allowed, forbidden and preferred neighbours, placement preferences, spawn distances and the "close to" rules (a strict
+///      one is honoured when its target is placed);
+///   7. validates the result with ShipGraphValidator.
+/// Rooms that need more decks than the ship has (a vertical-connection lobby on a single-deck ship) are never selected.
 /// An attempt that cannot satisfy a rule is abandoned and the next attempt (a different stream) starts again; after maxAttempts the result
 /// fails with every attempt's reason. An invalid graph is never returned as a success.
 /// </summary>
@@ -127,16 +131,19 @@ public sealed class ShipGraphGenerator
 
         public ShipGraph Run(out string why)
         {
-            why = SelectRooms() ?? AssignSectors() ?? FillStructural() ?? Layout();
+            why = SelectRooms() ?? AssignSectors() ?? PairEscapeBranches() ?? FillStructural() ?? Layout();
             return why == null ? g : null;
         }
 
         // ----- 1. Which rooms -----
 
+        // A room that links decks only exists on a ship with more than one deck.
+        bool Eligible(RoomSpec spec) => !(spec.requiresVerticalConnection && s.deckCount <= 1);
+
         string SelectRooms()
         {
             int n = rng.Range(s.minRooms, s.maxRooms);
-            foreach (var spec in gen.specs.Where(x => x.tier == RoomTier.Mandatory || x.minCount > 0))
+            foreach (var spec in gen.specs.Where(x => (x.tier == RoomTier.Mandatory || x.minCount > 0) && Eligible(x)))
             {
                 int count = rng.Range(spec.minCount, spec.maxCount);
                 for (int i = 0; i < count; i++) Add(spec, ShipSector.Forward);
@@ -144,7 +151,7 @@ public sealed class ShipGraphGenerator
             if (rooms.Count > n - 4) return $"the mandatory rooms ({rooms.Count}) leave no room in {n}";
             target = n;
 
-            var pool = gen.specs.Where(x => x.tier == RoomTier.Specialised).ToList();
+            var pool = gen.specs.Where(x => x.tier == RoomTier.Specialised && Eligible(x)).ToList();
             int want = System.Math.Min(rng.Range(s.minSpecialised, s.maxSpecialised), n - rooms.Count - 6);
             var weights = new List<float>();
             for (int k = 0; k < want; k++)
@@ -190,6 +197,26 @@ public sealed class ShipGraphGenerator
             return null;
         }
 
+        // Each escape pod bay gets its own access room in the same sector: the branch is (route room) -> access -> pod.
+        readonly List<(Room access, Room pod)> escapeBranches = new();
+
+        string PairEscapeBranches()
+        {
+            var pods = rooms.Where(r => r.spec.category == RoomCategory.EscapePodBay).OrderBy(r => r.order).ToList();
+            var accesses = rooms.Where(r => r.spec.requiredNeighbours.Contains(RoomCategory.EscapePodBay)).OrderBy(r => r.order).ToList();
+            bool podsNeedAccess = pods.Any(p => p.spec.onlyNeighbours.Length > 0);
+            if (!podsNeedAccess && accesses.Count == 0) return null; // a catalogue without access rooms: pods hang directly, as before
+            if (accesses.Count < pods.Count) return $"{pods.Count} escape pod bays but only {accesses.Count} escape access rooms";
+            if (accesses.Count > pods.Count) return $"{accesses.Count} escape access rooms for {pods.Count} escape pod bays";
+            for (int i = 0; i < pods.Count; i++)
+            {
+                if (!accesses[i].spec.AllowsSector(pods[i].sector)) return $"{accesses[i].spec.id} is not allowed in the {pods[i].sector} sector of its pod";
+                accesses[i].sector = pods[i].sector;
+                escapeBranches.Add((accesses[i], pods[i]));
+            }
+            return null;
+        }
+
         static int Popcount(SectorMask m)
         {
             int c = 0;
@@ -208,7 +235,7 @@ public sealed class ShipGraphGenerator
 
         string FillStructural()
         {
-            var pool = gen.specs.Where(x => x.tier == RoomTier.Structural).ToList();
+            var pool = gen.specs.Where(x => x.tier == RoomTier.Structural && Eligible(x)).ToList();
             var weights = new List<float>();
             var tied = new List<int>();
             while (rooms.Count < target)
@@ -259,7 +286,11 @@ public sealed class ShipGraphGenerator
 
         bool JunctionCapable(RoomSpec spec) => spec.Allows(GraphRoles.Junction) && MaxDegree(spec) >= 3;
 
-        static bool Anchored(RoomSpec spec) => spec.category is RoomCategory.Bridge or RoomCategory.Engineering or RoomCategory.EscapePodBay;
+        static bool Anchored(RoomSpec spec) => spec.category is RoomCategory.Bridge or RoomCategory.Engineering or RoomCategory.EscapePodBay
+            || spec.requiredNeighbours.Contains(RoomCategory.EscapePodBay);
+
+        // A room some other room of the sector must be near (strict "close to"): it is placed as a side room, where it can choose its host.
+        bool StrictTarget(Room r) => r.spec.CanBeLeaf && rooms.Any(x => x != r && x.sector == r.sector && x.spec.closeToStrict && x.spec.closeTo.Contains(r.spec.category));
 
         // ----- 4 and 5. Layout -----
 
@@ -276,13 +307,14 @@ public sealed class ShipGraphGenerator
                 var must = here.Where(r => r.spec.CanBeOnRoute && !r.spec.CanBeLeaf && JunctionCapable(r.spec)).ToList();
                 var passOnly = here.Where(r => r.spec.CanBeOnRoute && !r.spec.CanBeLeaf && !JunctionCapable(r.spec)).ToList();
                 // The Bridge, Engineering and the escape pods are anchored side rooms (see Branches), never route rooms.
-                var leafOnly = here.Where(r => !r.spec.CanBeOnRoute || Anchored(r.spec)).ToList();
-                var flexible = here.Where(r => r.spec.CanBeOnRoute && r.spec.CanBeLeaf && !Anchored(r.spec)).ToList();
+                var leafOnly = here.Where(r => !r.spec.CanBeOnRoute || Anchored(r.spec) || StrictTarget(r)).ToList();
+                var flexible = here.Where(r => r.spec.CanBeOnRoute && r.spec.CanBeLeaf && !Anchored(r.spec) && !StrictTarget(r)).ToList();
                 rng.Shuffle(flexible);
                 // Rooms that want to be near something are better as side rooms (they can choose where to hang); the rest fill the route.
                 // Junction-capable rooms first (they carry the loops and the side branches); rooms that want to be near something last.
                 flexible = flexible.OrderBy(r => r.spec.closeTo.Length > 0 ? 1 : 0).ThenBy(r => JunctionCapable(r.spec) ? 0 : 1).ToList();
-                int want = System.Math.Max(s.minRoutePerSector, (int)System.Math.Round(here.Count * s.routeShare)) - passOnly.Count / 2;
+                // Every sector carries at least its quarter of the minimum route, so the route is never too short to start with.
+                int want = System.Math.Max(System.Math.Max(s.minRoutePerSector, (int)System.Math.Round(here.Count * s.routeShare)), (s.minRouteLength + 3) / 4) - passOnly.Count / 2;
                 var onRoute = new List<Room>(must);
                 // The ends of the route: Security beside the Bridge, Power Control beside Engineering, when they are in those sectors.
                 var endRoom = sector == ShipSector.Forward ? RoomCategory.Security : sector == ShipSector.Industrial ? RoomCategory.PowerControl : (RoomCategory?)null;
@@ -324,12 +356,62 @@ public sealed class ShipGraphGenerator
             int head = route[0].node, tail = route[^1].node;
             Reserve(head, 1); // the Bridge
             Reserve(tail, 1); // Engineering
-
             string why = Loops(route, side);
+            if (why != null) return why;
+            why = ReserveEscapeHosts(route);
             if (why != null) return why;
             SpliceUnusedConnectors(side);
             spawnDist = g.Distances(g.FirstOf(RoomCategory.PlayerStart));
+            why = BuildEscapeBranches();
+            if (why != null) return why;
             return Branches(side, head, tail);
+        }
+
+        readonly Dictionary<int, int> escapeHost = new(); // escape branch index -> route node
+
+        // One route room per escape branch, in the branch's sector, before the loops take the sockets: distinct rooms, never the spawn, junction
+        // capable, not forbidden next to the access room, and not the route ends (the Bridge and Engineering hang there). Random among those.
+        string ReserveEscapeHosts(List<Room> route)
+        {
+            for (int i = 0; i < escapeBranches.Count; i++)
+            {
+                var (access, pod) = escapeBranches[i];
+                var sectors = new List<ShipSector> { access.sector };
+                foreach (var other in Sectors(access.spec.sectors & pod.spec.sectors)) if (!sectors.Contains(other)) sectors.Add(other);
+                var hosts = new List<int>();
+                foreach (var sector in sectors)
+                {
+                    for (int k = 1; k < route.Count - 1; k++)
+                    {
+                        var r = route[k];
+                        if (r.sector != sector || r.spec.category == RoomCategory.PlayerStart || escapeHost.ContainsValue(r.node)) continue;
+                        if (!JunctionCapable(r.spec) || Capacity(r.node) < 1 || Forbidden(r.spec, access.spec)) continue;
+                        hosts.Add(r.node);
+                    }
+                    if (hosts.Count == 0) continue;
+                    access.sector = pod.sector = sector;
+                    break;
+                }
+                if (hosts.Count == 0) return $"no route room can host the escape branch of {pod.spec.id} in the {pod.sector} sector";
+                int host = hosts[rng.Range(0, hosts.Count - 1)];
+                escapeHost[i] = host;
+                Reserve(host, 1);
+            }
+            return null;
+        }
+
+        // The reserved branches: route room -> Escape Access -> Escape Pod Bay.
+        string BuildEscapeBranches()
+        {
+            for (int i = 0; i < escapeBranches.Count; i++)
+            {
+                var (access, pod) = escapeBranches[i];
+                int host = escapeHost[i];
+                reserve[host] = Reserved(host) - 1;
+                if (!Attach(access, host)) return $"the escape access of {pod.spec.id} cannot attach to its reserved host";
+                if (!Attach(pod, access.node)) return $"{pod.spec.id} cannot attach to its escape access";
+            }
+            return null;
         }
 
         readonly Dictionary<int, int> reserve = new();
@@ -343,7 +425,10 @@ public sealed class ShipGraphGenerator
             rng.Shuffle(list);
             if (sector == ShipSector.Forward)
             {
-                var head = list.Where(r => JunctionCapable(r.spec)).OrderBy(r => r.spec.category == RoomCategory.Security ? 0 : r.spec.category == RoomCategory.CorridorJunction ? 1 : 2).First();
+                // Security beside the Bridge most of the time; otherwise another junction-capable room, so the forward end varies.
+                var capable = list.Where(r => JunctionCapable(r.spec)).ToList();
+                var head = rng.Chance(0.6) ? capable.OrderBy(r => r.spec.category == RoomCategory.Security ? 0 : r.spec.category == RoomCategory.CorridorJunction ? 1 : 2).First()
+                                           : capable[rng.Range(0, capable.Count - 1)];
                 list.Remove(head);
                 list.Insert(0, head);
             }
@@ -377,6 +462,7 @@ public sealed class ShipGraphGenerator
         // strictly inside some chord. That makes the route biconnected: removing any one room never splits it.
         string Loops(List<Room> route, List<Room> side)
         {
+            sideRooms = side;
             int m = route.Count - 1;
             int a = 0, chords = 0;
             var candidates = new List<int>();
@@ -384,12 +470,12 @@ public sealed class ShipGraphGenerator
             {
                 candidates.Clear();
                 int lo = System.Math.Min(a + s.minLoopSpan, m), hi = System.Math.Min(a + s.maxLoopSpan, m);
-                for (int b = lo; b <= hi; b++) if (Capacity(route[b].node) >= 1 && !Forbidden(route[a].spec, route[b].spec)) candidates.Add(b);
+                for (int b = lo; b <= hi; b++) if (Capacity(route[b].node) >= 1 && !Forbidden(route[a].spec, route[b].spec) && ChordKeepsDistances(route, a, b)) candidates.Add(b);
                 if (candidates.Count == 0) // a shorter loop, still skipping at least one room
-                    for (int b = a + 2; b < lo; b++) if (Capacity(route[b].node) >= 1 && !Forbidden(route[a].spec, route[b].spec)) candidates.Add(b);
+                    for (int b = a + 2; b < lo; b++) if (Capacity(route[b].node) >= 1 && !Forbidden(route[a].spec, route[b].spec) && ChordKeepsDistances(route, a, b)) candidates.Add(b);
                 if (candidates.Count == 0) return $"no loop can start at route position {a}";
                 int end = candidates.Contains(m) ? m : candidates[rng.Range(0, candidates.Count - 1)];
-                Chord(route[a], route[end], side);
+                Chord(route[a], route[end], side, !ChordKeepsDistances(route, a, end, false));
                 chords++;
                 if (end == m) break;
                 // The next chord starts strictly inside this one (1 or 2 rooms back from its end), so the two overlap.
@@ -403,24 +489,70 @@ public sealed class ShipGraphGenerator
             {
                 int x = rng.Range(0, m - 2), y = System.Math.Min(m, x + rng.Range(2, s.maxLoopSpan));
                 if (Capacity(route[x].node) < 1 || Capacity(route[y].node) < 1 || g.Connected(route[x].node, route[y].node) || Forbidden(route[x].spec, route[y].spec)) continue;
-                Chord(route[x], route[y], side);
+                if (!ChordKeepsDistances(route, x, y)) continue;
+                Chord(route[x], route[y], side, !ChordKeepsDistances(route, x, y, false));
                 chords++;
             }
             if (chords < s.minLoops) return $"only {chords} loop(s) fit along a route of {route.Count}";
             return null;
         }
 
+        // A loop is a shortcut: it must not bring the Bridge (off the route's head) nearer the spawn than its definition allows, nor nearer
+        // Engineering (off the tail) than the ship's separation rule, nor Engineering too near the spawn. Checked as a direct connection, the
+        // shortest a chord can be, so it holds whichever way the chord is built.
+        bool ChordKeepsDistances(List<Room> route, int ia, int ib) => ChordKeepsDistances(route, ia, ib, false) || (ConnectorsFor(route[ia], route[ib]).Count > 0 && ChordKeepsDistances(route, ia, ib, true));
+
+        bool ChordKeepsDistances(List<Room> route, int ia, int ib, bool viaConnector)
+        {
+            int a = route[ia].node, b = route[ib].node;
+            if (g.Connected(a, b)) return true;
+            int head = route[0].node, tail = route[^1].node;
+            int spawn = route.FirstOrDefault(r => r.spec.category == RoomCategory.PlayerStart)?.node ?? -1;
+            var bridge = rooms.FirstOrDefault(r => r.spec.category == RoomCategory.Bridge);
+            var eng = rooms.FirstOrDefault(r => r.spec.category == RoomCategory.Engineering);
+            // A chord through a connector room is two steps long: model it with a temporary stand-in node.
+            int extra = -1;
+            if (viaConnector)
+            {
+                extra = g.AddNode(new RoomSpec { id = "chord_probe" }, ShipSector.Forward, 0, 0).index;
+                g.AddEdge(a, extra);
+                g.AddEdge(extra, b);
+            }
+            else g.AddEdge(a, b);
+            try
+            {
+                var fromHead = g.Distances(head);
+                if (fromHead[tail] + 2 < s.minBridgeEngineeringDistance) return false;
+                if (spawn >= 0)
+                {
+                    if (bridge != null && bridge.spec.minSpawnDistance >= 0 && fromHead[spawn] + 1 < bridge.spec.minSpawnDistance) return false;
+                    if (eng != null && eng.spec.minSpawnDistance >= 0 && g.Distances(tail)[spawn] + 1 < eng.spec.minSpawnDistance) return false;
+                }
+                return true;
+            }
+            finally
+            {
+                if (extra >= 0) { g.RemoveEdge(a, extra); g.RemoveEdge(extra, b); g.nodes.RemoveAt(extra); }
+                else g.RemoveEdge(a, b);
+            }
+        }
+
         // A chord goes through a free connector room (a structural side room that can be a thoroughfare) when there is one in either end's
         // sector, otherwise it is a direct connection between the two route rooms.
-        void Chord(Room a, Room b, List<Room> side)
+        List<Room> sideRooms = new();
+
+        List<Room> ConnectorsFor(Room a, Room b) =>
+            sideRooms.Where(r => r.node < 0 && r.spec.tier != RoomTier.Mandatory && (r.sector == a.sector || r.sector == b.sector) && r.spec.Allows(GraphRoles.Thoroughfare)
+                                 && MaxDegree(r.spec) >= 2 && !Forbidden(r.spec, a.spec) && !Forbidden(r.spec, b.spec) && !Anchored(r.spec))
+                     .OrderBy(r => r.order).ToList();
+
+        void Chord(Room a, Room b, List<Room> side, bool needConnector)
         {
-            var connectors = side.Where(r => r.node < 0 && r.spec.tier != RoomTier.Mandatory && (r.sector == a.sector || r.sector == b.sector) && r.spec.Allows(GraphRoles.Thoroughfare)
-                                             && MaxDegree(r.spec) >= 2 && !Forbidden(r.spec, a.spec) && !Forbidden(r.spec, b.spec))
-                                 .OrderBy(r => r.order).ToList();
+            var connectors = ConnectorsFor(a, b);
             // Pass-only rooms (an airlock, a service tunnel) first: a loop is exactly what they are for. Then other structural rooms.
             var passOnly = connectors.Where(r => !r.spec.CanBeLeaf).ToList();
             var structural = connectors.Where(r => r.spec.tier == RoomTier.Structural).ToList();
-            var pool = passOnly.Count > 0 ? passOnly : structural.Count > 0 && rng.Chance(0.7) ? structural : null;
+            var pool = passOnly.Count > 0 ? passOnly : structural.Count > 0 && (needConnector || rng.Chance(0.7)) ? structural : needConnector && connectors.Count > 0 ? connectors : null;
             if (pool != null)
             {
                 var c = pool[rng.Range(0, pool.Count - 1)];
@@ -436,7 +568,7 @@ public sealed class ShipGraphGenerator
         // every loop intact).
         void SpliceUnusedConnectors(List<Room> side)
         {
-            foreach (var c in side.Where(r => r.node < 0 && !r.spec.CanBeLeaf).ToList())
+            foreach (var c in side.Where(r => r.node < 0 && !r.spec.CanBeLeaf && !Anchored(r.spec)).ToList())
             {
                 var slots = new List<int>();
                 for (int k = 1; k < g.route.Count; k++)
@@ -491,6 +623,14 @@ public sealed class ShipGraphGenerator
 
         void FindHosts(Room r, ShipSector sector, List<(int node, double score)> candidates)
         {
+                // Placed rooms with a strict "close to" rule naming this room's category that is not met yet: this room must be the one that
+                // meets it, so only hosts within reach of them qualify.
+                var owed = new List<(int node, int limit, int[] dist)>();
+                foreach (var x in byNode.Values)
+                    if (x.spec.closeToStrict && x.spec.closeTo.Contains(r.spec.category) && !StrictlyMet(x))
+                        owed.Add((x.node, x.spec.closeToDistance, g.Distances(x.node)));
+                var routeIndex = new Dictionary<int, int>();
+                for (int k = 0; k < g.route.Count; k++) routeIndex[g.route[k]] = k;
                 foreach (var host in g.nodes)
                 {
                     var hr = byNode[host.index];
@@ -500,8 +640,19 @@ public sealed class ShipGraphGenerator
                     if (spawnDist[host.index] < 0 || (r.spec.minSpawnDistance >= 0 && d < r.spec.minSpawnDistance) || (r.spec.maxSpawnDistance >= 0 && d > r.spec.maxSpawnDistance)) continue;
                     if (r.spec.category == RoomCategory.EscapePodBay && !PodHostOk(host.index)) continue;
                     if (r.spec.closeToStrict && r.spec.closeTo.Length > 0 && !CloseEnough(host.index, r.spec, out bool targetExists) && targetExists) continue;
+                    if (owed.Any(o => o.dist[host.index] < 0 || o.dist[host.index] + 1 > o.limit)) continue;
+                    if (r.spec.onlyNeighbours.Length > 0 && !r.spec.onlyNeighbours.Contains(hr.spec.category)) continue;
+                    if (hr.spec.onlyNeighbours.Length > 0 && !hr.spec.onlyNeighbours.Contains(r.spec.category)) continue;
                     double score = rng.NextDouble() - 0.6 * host.Degree + (hr.depth == 0 ? 0.5 : 0);
                     if (r.spec.preferredNeighbours.Contains(hr.spec.category) || hr.spec.preferredNeighbours.Contains(r.spec.category)) score += 2;
+                    else if (host.neighbours.Any(v => r.spec.preferredNeighbours.Contains(g.nodes[v].category))) score += 1; // a preferred room two steps away
+                    if ((r.spec.placement & PlacementPreference.Transit) != 0 && hr.depth == 0) score += 1.5;
+                    if ((r.spec.placement & PlacementPreference.SideBranch) != 0 && hr.depth >= 1) score += 1.5;
+                    if ((r.spec.placement & PlacementPreference.Central) != 0 && g.route.Count > 1)
+                    {
+                        int k = routeIndex.TryGetValue(host.index, out int ri) ? ri : routeIndex.TryGetValue(host.neighbours.FirstOrDefault(v => routeIndex.ContainsKey(v)), out int rj) ? rj : -1;
+                        if (k >= 0) score += 1.5 * (1.0 - System.Math.Abs((double)k / (g.route.Count - 1) - 0.5) * 2.0);
+                    }
                     if (r.spec.closeTo.Length > 0 && CloseEnough(host.index, r.spec, out _)) score += 3;
                     candidates.Add((host.index, score));
                 }
@@ -528,6 +679,14 @@ public sealed class ShipGraphGenerator
                 if (d >= 0 && d + 1 < s.minEscapePodSeparation) return false;
             }
             return true;
+        }
+
+        // A strict "close to" rule is met when a target room is within its distance.
+        bool StrictlyMet(Room x)
+        {
+            var d = g.Distances(x.node);
+            foreach (var n in g.nodes) if (x.spec.closeTo.Contains(n.category) && d[n.index] >= 0 && d[n.index] <= x.spec.closeToDistance) return true;
+            return false;
         }
 
         // Would a room hung off this host be within its closeTo distance of a target? targetExists is false when no target room is placed yet.

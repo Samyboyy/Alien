@@ -6,9 +6,14 @@ using System.Linq;
 public sealed class DirectorSettings
 {
     public int maxAttempts = 80;
-    public int minGates = 1, maxGates = 3;
+    /// <summary>Gated doors added elsewhere in the ship, beyond the obstacle on each escape branch (usually on a loop, so a longer way round exists).</summary>
+    public int minGates = 0, maxGates = 1;
     /// <summary>How the primary way through a gated door is chosen.</summary>
     public float weightKeycard = 0.5f, weightPower = 0.25f, weightRemote = 0.25f;
+    /// <summary>Chance that a loud, power-hungry pod also has a gated door on its own branch (its power chain is already the main effort).</summary>
+    public float loudPodBranchGate = 0.7f;
+    /// <summary>The route pressure budget every usable pod route must meet.</summary>
+    public PressureSettings pressure = new();
     /// <summary>Chance that a door also has a manual override (loud, slow, needs nothing) next to its keycard, power or remote control.</summary>
     public float overrideAlternative = 0.35f;
     /// <summary>Chance that the second pod is also usable (the first always is).</summary>
@@ -17,7 +22,12 @@ public sealed class DirectorSettings
     /// <summary>A scenario with no meaningful route choice is rejected.</summary>
     public bool requireChoice = true;
 
-    public DirectorSettings Clone() => (DirectorSettings)MemberwiseClone();
+    public DirectorSettings Clone()
+    {
+        var c = (DirectorSettings)MemberwiseClone();
+        c.pressure = (pressure ?? new PressureSettings()).Clone();
+        return c;
+    }
 }
 
 public sealed class DirectorInput
@@ -44,10 +54,10 @@ public sealed class ScenarioResult
 }
 
 /// <summary>
-/// Escape Director V1. For a placed ship it chooses which pods work, gates a few connections with obstacles the game already supports
+/// Escape Director. For a placed ship it chooses which pods work, gates each pod's escape branch and a few other connections with obstacles the game already supports
 /// (keycard door, powered door, remote door, manual override, the fuse and generator chain, a noisy pod launch, a quiet slow one), places the
 /// keycard and fuse among several plausible anchors, adds optional equipment and a camera console configuration, and then asks the solver whether a
-/// single player can escape and whether the player has a real choice. A scenario that fails is thrown away and the next attempt (another random
+/// single player can escape, whether the player has a real choice, and whether every way out meets the route pressure budget. A scenario that fails is thrown away and the next attempt (another random
 /// stream from the same seed) starts again; the result keeps every reason.
 /// </summary>
 public static class EscapeDirector
@@ -68,6 +78,13 @@ public static class EscapeDirector
             if (!solve.solved) { result.rejections.Add($"attempt {attempt + 1}: unsolvable: {string.Join("; ", solve.failures.Take(4))}"); continue; }
             var problems = Validate(input, sc);
             if (settings.requireChoice && !solve.HasChoice) problems.Add("no meaningful route choice (one pod, no alternative way through any door)");
+            // The pressure budget: every way out must cost something. A trivially direct escape is rejected, not padded with chores.
+            var ps = settings.pressure ?? new PressureSettings();
+            foreach (var plan in solve.plans)
+            {
+                RoutePressure.Assess(g, sc, plan, ps);
+                if (plan.pressure < ps.minimum) problems.Add($"the route to {g.nodes[plan.podNode].id} is too easy (pressure {plan.pressure:0.0} below {ps.minimum:0.0})");
+            }
             if (problems.Count > 0) { result.rejections.Add($"attempt {attempt + 1}: {string.Join("; ", problems.Take(3))}"); continue; }
             result.scenario = sc;
             result.solve = solve;
@@ -100,40 +117,27 @@ public static class EscapeDirector
         var usable = sc.pods.Where(p => p.Usable).ToList();
         // When two pods work they should differ, so the choice is real: one loud and powered, one quiet and slow.
         if (usable.Count >= 2 && usable[0].mode == usable[1].mode) usable[1].mode = usable[0].mode == LaunchMode.Loud ? LaunchMode.ManualQuiet : LaunchMode.Loud;
+        // A damaged pod always needs power, so the other working pod is the quiet, unpowered way out: the two routes must not cost the same.
+        if (usable.Count >= 2 && usable.All(p => p.NeedsPower))
+            foreach (var p in usable.Where(p => p.status == PodStatus.Operational)) p.mode = LaunchMode.ManualQuiet;
         foreach (var pod in sc.pods)
             if (pod.Usable)
                 sc.consoles.Add(new ConsolePlan { role = ConsoleRole.PodLaunch, node = pod.node, anchorId = AnchorOf(input, pod.node, AnchorSemantic.PodLaunchConsole), podNode = pod.node });
         if (sc.consoles.Any(c => string.IsNullOrEmpty(c.anchorId))) { why = "an escape bay has no launch console anchor"; return null; }
 
-        // 2. Gates on connections, preferring the ones on the way to a pod and on loops.
+        // 2. Gated doors. First on each usable pod's own escape branch (host -> access -> pod: a door no route can avoid), chosen to keep the two
+        //    ways out different: a quiet, slow pod sits behind something that needs preparation (the keycard, or a remote release from
+        //    Security); a loud pod that needs power may also sit behind a powered or keycard door, or behind nothing more than its power chain.
+        //    Then a few doors elsewhere, preferring loops so a longer way round exists. Any door may also get a loud manual override.
         var dist = g.Distances(sc.spawnNode);
-        var pathEdges = new HashSet<int>();
-        foreach (var pod in usable) foreach (int e in ShortestPathEdges(g, sc.spawnNode, pod.node)) pathEdges.Add(e);
-        int gateCount = rng.Range(s.minGates, s.maxGates);
         var taken = new HashSet<int>();
         bool remoteUsed = false;
         int security = g.FirstOf(RoomCategory.Security);
-        for (int k = 0; k < gateCount; k++)
+        bool CanRemote() => !remoteUsed && security >= 0 && !string.IsNullOrEmpty(AnchorOf(input, security, AnchorSemantic.DoorControlConsole));
+        void AddGate(int edge, OptionKind kind, bool mayOverride)
         {
-            var pool = new List<int>();
-            var weights = new List<float>();
-            for (int e = 0; e < g.EdgeCount; e++)
-            {
-                if (taken.Contains(e) || g.edges[e].a == sc.spawnNode || g.edges[e].b == sc.spawnNode) continue;
-                pool.Add(e);
-                bool onPath = pathEdges.Contains(e), bypass = ScenarioSolver.HasBypass(g, e);
-                // The first gate must really block the way to a pod (no way round), so there is something to find or fix before escaping.
-                if (k == 0 && (!onPath || bypass)) { pool.RemoveAt(pool.Count - 1); continue; }
-                weights.Add(onPath ? (bypass ? 1.5f : 5f) : (bypass ? 1f : 1.5f));
-            }
-            int pick = rng.Weighted(weights);
-            if (pick < 0) break;
-            int edge = pool[pick];
             taken.Add(edge);
             var gate = new DoorGate { edge = edge, doorNode = dist[g.edges[edge].a] >= dist[g.edges[edge].b] ? g.edges[edge].a : g.edges[edge].b };
-            bool canRemote = !remoteUsed && security >= 0 && !string.IsNullOrEmpty(AnchorOf(input, security, AnchorSemantic.DoorControlConsole));
-            int roll = rng.Weighted(new List<float> { s.weightKeycard, s.weightPower, canRemote ? s.weightRemote : 0f });
-            var kind = roll == 0 ? OptionKind.Keycard : roll == 1 ? OptionKind.Power : OptionKind.Remote;
             if (kind == OptionKind.Remote)
             {
                 remoteUsed = true;
@@ -146,8 +150,51 @@ public static class EscapeDirector
                 gate.options.Add(new GateOption(kind));
                 gate.story = kind == OptionKind.Keycard ? "a keycard door" : "a door that needs ship power";
             }
-            if (k > 0 && rng.Chance(s.overrideAlternative)) { gate.options.Add(new GateOption(OptionKind.Override)); gate.story += ", with a loud manual override"; }
+            if (mayOverride && rng.Chance(s.overrideAlternative)) { gate.options.Add(new GateOption(OptionKind.Override)); gate.story += ", with a loud manual override"; }
             sc.gates.Add(gate);
+        }
+        var branchNodes = new HashSet<int>(bays);
+        foreach (int bay in bays) foreach (int v in g.nodes[bay].neighbours) branchNodes.Add(v);
+        foreach (var pod in usable)
+        {
+            // The pod bay door, or the door into its access room.
+            var branchEdges = new List<int>();
+            for (int e = 0; e < g.EdgeCount; e++)
+            {
+                var ed = g.edges[e];
+                if (ed.a == sc.spawnNode || ed.b == sc.spawnNode || taken.Contains(e)) continue;
+                bool touchesPod = ed.a == pod.node || ed.b == pod.node;
+                bool intoAccess = g.nodes[pod.node].neighbours.Any(acc => (ed.a == acc || ed.b == acc) && ed.a != pod.node && ed.b != pod.node);
+                if (touchesPod || intoAccess) branchEdges.Add(e);
+            }
+            if (branchEdges.Count == 0) continue;
+            int edge = branchEdges[rng.Range(0, branchEdges.Count - 1)];
+            bool quiet = pod.mode == LaunchMode.ManualQuiet && pod.status == PodStatus.Operational;
+            OptionKind kind;
+            if (quiet) kind = CanRemote() && rng.Chance(s.weightRemote / (s.weightRemote + s.weightKeycard)) ? OptionKind.Remote : OptionKind.Keycard;
+            else
+            {
+                if (!rng.Chance(s.loudPodBranchGate)) continue;
+                kind = rng.Weighted(new List<float> { s.weightKeycard, s.weightPower }) == 0 ? OptionKind.Keycard : OptionKind.Power;
+            }
+            AddGate(edge, kind, true);
+        }
+        int extra = rng.Range(s.minGates, s.maxGates);
+        for (int k = 0; k < extra; k++)
+        {
+            var pool = new List<int>();
+            var weights = new List<float>();
+            for (int e = 0; e < g.EdgeCount; e++)
+            {
+                var ed = g.edges[e];
+                if (taken.Contains(e) || ed.a == sc.spawnNode || ed.b == sc.spawnNode || branchNodes.Contains(ed.a) || branchNodes.Contains(ed.b)) continue;
+                pool.Add(e);
+                weights.Add(ScenarioSolver.HasBypass(g, e) ? 3f : 1f);
+            }
+            int pick = rng.Weighted(weights);
+            if (pick < 0) break;
+            int roll = rng.Weighted(new List<float> { s.weightKeycard, s.weightPower, CanRemote() ? s.weightRemote : 0f });
+            AddGate(pool[pick], roll == 0 ? OptionKind.Keycard : roll == 1 ? OptionKind.Power : OptionKind.Remote, true);
         }
         if (sc.gates.Count == 0) { why = "no connection could be gated"; return null; }
 

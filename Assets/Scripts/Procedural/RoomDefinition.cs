@@ -37,6 +37,12 @@ public class RoomDefinition : ScriptableObject
     [Tooltip("Should be within closeToDistance connections of one of these")] public RoomCategory[] closeTo = new RoomCategory[0];
     [Min(1)] public int closeToDistance = 2;
     [Tooltip("On: being further is an error. Off: a warning.")] public bool closeToStrict;
+    [Tooltip("When not empty, every neighbour must be one of these (an escape pod bay only opens onto its escape access)")] public RoomCategory[] onlyNeighbours = new RoomCategory[0];
+    [Tooltip("Must have at least one neighbour of each of these (an escape access leads to its pod bay)")] public RoomCategory[] requiredNeighbours = new RoomCategory[0];
+    [Tooltip("Where the room likes to hang: a scoring preference, never a hard rule")] public PlacementPreference placement;
+
+    [Header("Decks")]
+    [Tooltip("A functional connection between decks (lift or stair lobby). Never generated on a single-deck ship.")] public bool requiresVerticalConnection;
 
     [Header("Capabilities (for the future placement and population layers)")]
     public RoomFeatures features = RoomFeatures.Doors | RoomFeatures.Vents | RoomFeatures.ItemAnchors;
@@ -51,6 +57,8 @@ public class RoomDefinition : ScriptableObject
         preferredNeighbours = preferredNeighbours ?? new RoomCategory[0], forbiddenNeighbours = forbiddenNeighbours ?? new RoomCategory[0],
         minSpawnDistance = minSpawnDistance, maxSpawnDistance = maxSpawnDistance, mayBeDeadEnd = mayBeDeadEnd, features = features, weight = weight, deck = deck,
         closeTo = closeTo ?? new RoomCategory[0], closeToDistance = closeToDistance, closeToStrict = closeToStrict, spreadAcrossSectors = spreadAcrossSectors,
+        onlyNeighbours = onlyNeighbours ?? new RoomCategory[0], requiredNeighbours = requiredNeighbours ?? new RoomCategory[0], placement = placement,
+        requiresVerticalConnection = requiresVerticalConnection,
     };
 
     /// <summary>Copies every value of a spec into this asset (used only when the asset is first created).</summary>
@@ -62,5 +70,15 @@ public class RoomDefinition : ScriptableObject
         preferredNeighbours = (RoomCategory[])s.preferredNeighbours.Clone(); forbiddenNeighbours = (RoomCategory[])s.forbiddenNeighbours.Clone();
         minSpawnDistance = s.minSpawnDistance; maxSpawnDistance = s.maxSpawnDistance; closeTo = (RoomCategory[])s.closeTo.Clone();
         closeToDistance = s.closeToDistance; closeToStrict = s.closeToStrict; features = s.features;
+        CopyRulesFrom(s);
+    }
+
+    /// <summary>Copies only the relationship and capability rules (used by Alien > Procedural Ship > Apply Default Rule Updates To Room Definitions).</summary>
+    public void CopyRulesFrom(RoomSpec s)
+    {
+        preferredNeighbours = (RoomCategory[])s.preferredNeighbours.Clone(); forbiddenNeighbours = (RoomCategory[])s.forbiddenNeighbours.Clone();
+        closeTo = (RoomCategory[])s.closeTo.Clone(); closeToDistance = s.closeToDistance; closeToStrict = s.closeToStrict;
+        onlyNeighbours = (RoomCategory[])s.onlyNeighbours.Clone(); requiredNeighbours = (RoomCategory[])s.requiredNeighbours.Clone();
+        placement = s.placement; requiresVerticalConnection = s.requiresVerticalConnection;
     }
 }

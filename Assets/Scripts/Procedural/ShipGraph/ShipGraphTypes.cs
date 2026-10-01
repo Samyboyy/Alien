@@ -32,6 +32,8 @@ public enum RoomCategory : byte
     // Generic structural
     SmallStorage, UtilityRoom, MaintenanceRoom, CorridorJunction, MachineryChamber, EmptyOffice, DamagedCompartment, ConnectingAirlock,
     ServiceTunnel, VerticalLobby,
+    // Appended later (values are stored in assets: never reorder)
+    EscapeAccess,
 }
 
 public enum RoomTier : byte { Mandatory, Specialised, Structural }
@@ -64,6 +66,19 @@ public enum RoomFeatures : byte
     All = Doors | Vents | Objectives | Cameras | Hazards | ItemAnchors,
 }
 
+/// <summary>Where a room likes to hang, used as a scoring preference when side rooms are placed (never a hard rule).</summary>
+[System.Flags]
+public enum PlacementPreference : byte
+{
+    None = 0,
+    /// <summary>Directly off the primary route (a major transit way).</summary>
+    Transit = 1,
+    /// <summary>Off the route on a side branch (a useful detour, not on the way).</summary>
+    SideBranch = 2,
+    /// <summary>Near the middle of the ship rather than at either end.</summary>
+    Central = 4,
+}
+
 /// <summary>
 /// One room definition, as the generator and validator use it. A RoomDefinition asset converts to this, and DefaultRoomCatalogue builds the
 /// default set from code (so tests need no assets). -1 means "no limit" for the optional distance limits and "any deck" for the deck.
@@ -93,6 +108,13 @@ public sealed class RoomSpec
     public bool closeToStrict;
     /// <summary>Several rooms of this definition go to different sectors where the definition allows it (escape pods, crew quarters).</summary>
     public bool spreadAcrossSectors;
+    /// <summary>When not empty, every neighbour of this room must be one of these categories (an escape pod bay only opens onto its access room).</summary>
+    public RoomCategory[] onlyNeighbours = new RoomCategory[0];
+    /// <summary>This room must have at least one neighbour of each of these categories (an escape access room leads to its pod bay).</summary>
+    public RoomCategory[] requiredNeighbours = new RoomCategory[0];
+    /// <summary>The room is a functional connection between decks (a lift or stair lobby). Single-deck ships never include it.</summary>
+    public bool requiresVerticalConnection;
+    public PlacementPreference placement;
 
     public bool Allows(GraphRoles role) => (roles & role) != 0;
     public bool AllowsSector(ShipSector s) => (sectors & ToMask(s)) != 0;
@@ -146,6 +168,8 @@ public enum GraphIssueCode : byte
     DeckNotPermitted, EscapePodSeparation, EscapePodSameBranch, SpawnNextToEscapePod, BridgeNotForward, EngineeringNotAft, BridgeEngineeringTooClose,
     BridgeNotFurthest, ProximityRequired, ProximityPreferred, SectorCutVertex, RouteInvalid, TooFewSideBranches, TooFewNonTerminal,
     GenericDeadEnds, SectorEmpty, BranchTooDeep,
+    // Appended later
+    NeighbourNotAllowed, RequiredNeighbourMissing, RequiresMultiDeck,
 }
 
 /// <summary>One validation finding, with the nodes it concerns (indices into the graph).</summary>

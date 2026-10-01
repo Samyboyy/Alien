@@ -22,6 +22,57 @@ public static class RoomDefinitionSetup
         int created = CreateOrRepair(out var notes);
         foreach (var n in notes) Debug.Log(n);
         Debug.Log(created == 0 ? "Room definitions: everything was already in place; nothing changed." : $"Room definitions: {created} change(s) made and saved.");
+        var stale = RuleDifferences();
+        if (stale.Count > 0)
+            Debug.LogWarning($"Room definitions: {stale.Count} existing definition(s) differ from the current default relationship rules (they were not changed): " +
+                             string.Join("; ", stale.Take(6).Select(x => x.summary)) + (stale.Count > 6 ? "; ..." : "") +
+                             ". Review and apply them with Alien > Procedural Ship > Apply Default Rule Updates To Room Definitions.");
+    }
+
+    /// <summary>
+    /// Menu: Alien > Procedural Ship > Apply Default Rule Updates To Room Definitions. For definitions whose id is in the default catalogue, lists
+    /// every difference in the relationship and capability rules only (preferred, forbidden, only and required neighbours, "close to", placement
+    /// preference, vertical connection) and, after a confirmation, copies the defaults over those fields. Counts, sectors, weights, roles and
+    /// every other field stay as they are. Nothing happens without the confirmation.
+    /// </summary>
+    [MenuItem("Alien/Procedural Ship/Apply Default Rule Updates To Room Definitions")]
+    static void ApplyRuleUpdates()
+    {
+        var diffs = RuleDifferences();
+        if (diffs.Count == 0) { Debug.Log("Room definitions: every definition already has the default relationship rules."); return; }
+        string list = string.Join("\n", diffs.Take(20).Select(d => "- " + d.summary)) + (diffs.Count > 20 ? $"\n... and {diffs.Count - 20} more" : "");
+        if (!EditorUtility.DisplayDialog("Apply Default Rule Updates", $"{diffs.Count} definition(s) differ from the default relationship rules:\n\n{list}\n\nOverwrite only these rule fields with the defaults? Other values are kept.", "Apply", "Cancel"))
+            return;
+        foreach (var d in diffs)
+        {
+            Undo.RecordObject(d.asset, "Apply default room rules");
+            d.asset.CopyRulesFrom(d.spec);
+            EditorUtility.SetDirty(d.asset);
+            Debug.Log($"Room definition '{d.asset.id}': rules updated ({d.summary}).");
+        }
+        AssetDatabase.SaveAssets();
+    }
+
+    internal static List<(RoomDefinition asset, RoomSpec spec, string summary)> RuleDifferences()
+    {
+        var defaults = DefaultRoomCatalogue.Create().ToDictionary(x => x.id);
+        var list = new List<(RoomDefinition, RoomSpec, string)>();
+        foreach (var a in AllDefinitions())
+        {
+            if (string.IsNullOrEmpty(a.id) || !defaults.TryGetValue(a.id, out var d)) continue;
+            var have = a.ToSpec();
+            var fields = new List<string>();
+            bool Same(RoomCategory[] x, RoomCategory[] y) => x.OrderBy(c => c).SequenceEqual(y.OrderBy(c => c));
+            if (!Same(have.preferredNeighbours, d.preferredNeighbours)) fields.Add("preferred neighbours");
+            if (!Same(have.forbiddenNeighbours, d.forbiddenNeighbours)) fields.Add("forbidden neighbours");
+            if (!Same(have.closeTo, d.closeTo) || have.closeToDistance != d.closeToDistance || have.closeToStrict != d.closeToStrict) fields.Add("close-to rule");
+            if (!Same(have.onlyNeighbours, d.onlyNeighbours)) fields.Add("only neighbours");
+            if (!Same(have.requiredNeighbours, d.requiredNeighbours)) fields.Add("required neighbours");
+            if (have.placement != d.placement) fields.Add("placement preference");
+            if (have.requiresVerticalConnection != d.requiresVerticalConnection) fields.Add("vertical connection");
+            if (fields.Count > 0) list.Add((a, d, $"{a.id}: {string.Join(", ", fields)}"));
+        }
+        return list;
     }
 
     internal static int CreateOrRepair(out List<string> notes)

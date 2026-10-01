@@ -96,27 +96,11 @@ public class PhysicalShipWindow : EditorWindow
         return sb.ToString();
     }
 
+    // A batch audit of seeds from Seed (graph, placement and scenario) with the window's profile and library; the full report goes to Logs.
     void Batch()
     {
-        var req = Request();
-        var templates = library != null ? library.BuildTemplates() : TemplateLibrary.FromBlueprints();
-        var gg = profile != null ? profile.CreateGenerator() : new ShipGraphGenerator(DefaultRoomCatalogue.Create());
-        var placer = new ShipPlacer(templates, gg.Specs, req.placement);
-        int ok = 0, worst = 0, worstSeed = 0;
-        var failed = new List<int>();
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        for (int i = 0; i < batchSize; i++)
-        {
-            var g = gg.Generate(seed + i);
-            if (!g.success) { failed.Add(seed + i); continue; }
-            var p = placer.Place(g.graph);
-            if (!p.success) { failed.Add(seed + i); continue; }
-            var specs = gg.Specs.ToDictionary(x => x.id);
-            var lay = p.layout;
-            var sc = EscapeDirector.Generate(new DirectorInput { graph = g.graph, layoutSeed = seed + i, templateOf = n => lay.rooms[n].template, specOf = id => specs[id] }, scenarioSeed, director);
-            if (sc.success) { ok++; if (p.attempts > worst) { worst = p.attempts; worstSeed = seed + i; } } else failed.Add(seed + i);
-        }
-        batchNote = $"Layout seeds {seed}..{seed + batchSize - 1} with scenario seed {scenarioSeed}: {ok}/{batchSize} placed and scenario-solved in {sw.ElapsedMilliseconds} ms; most attempts {worst} (seed {worstSeed})" + (failed.Count > 0 ? $"; FAILED: {string.Join(", ", failed.Take(20))}" : "");
+        var audit = ProceduralAuditMenu.RunAudit(seed, batchSize, true, scenarioSeed);
+        batchNote = audit.Summary() + $"Full report: {ProceduralAuditMenu.ReportPath}";
     }
 
     void Build()
@@ -162,7 +146,7 @@ public class PhysicalShipWindow : EditorWindow
 
         EditorGUILayout.BeginHorizontal();
         batchSize = Mathf.Clamp(EditorGUILayout.IntField("Batch check", batchSize), 1, 1000);
-        if (GUILayout.Button($"Place {batchSize} seeds from Seed", GUILayout.Width(190))) Batch();
+        if (GUILayout.Button($"Audit {batchSize} seeds from Seed", GUILayout.Width(190))) Batch();
         EditorGUILayout.EndHorizontal();
         if (!string.IsNullOrEmpty(batchNote)) EditorGUILayout.HelpBox(batchNote, MessageType.None);
 
@@ -172,6 +156,11 @@ public class PhysicalShipWindow : EditorWindow
         EditorGUI.EndDisabledGroup();
         if (GUILayout.Button("Validate Open Scene")) PhysicalShipValidator.Validate(Object.FindFirstObjectByType<GeneratedShip>(), library, true).LogToConsole();
         if (GUILayout.Button("Copy Report")) EditorGUIUtility.systemCopyBuffer = report;
+        if (GUILayout.Button("Export Report..."))
+        {
+            string path = EditorUtility.SaveFilePanel("Export ship and scenario report", "", $"ship-{seed}-scenario-{scenarioSeed}.txt", "txt");
+            if (!string.IsNullOrEmpty(path)) System.IO.File.WriteAllText(path, report);
+        }
         EditorGUILayout.EndHorizontal();
 
         EditorGUILayout.BeginHorizontal();

@@ -83,6 +83,12 @@ public static class PhysicalShipValidator
         for (int i = 0; i < ship.nodes.Count; i++)
             for (int s = 0; s < byIndex[i].room.sockets.Length; s++)
                 if (byIndex[i].room.sockets[s].sealedOff) layout.sealedSockets.Add(new SealedSocket(i, s));
+        // The logical rules on the graph the scene records: required rooms, Crew/Mess distance, escape-access predecessors, terminal pods,
+        // single-deck filtering, Bridge and Engineering separation, connectivity and loops.
+        var graphSettings = profile != null && profile.settings != null ? profile.settings : new ShipGraphSettings();
+        foreach (var issue in new ShipGraphValidator(catalogue, graphSettings).Validate(graph).issues)
+            (issue.severity == IssueSeverity.Error ? rep.errors : rep.warnings).Add($"graph {issue.code}: {issue.message}");
+
         var pure = new ShipLayoutValidator(layout.settings).Validate(layout, catalogue);
         foreach (var issue in pure.issues)
         {

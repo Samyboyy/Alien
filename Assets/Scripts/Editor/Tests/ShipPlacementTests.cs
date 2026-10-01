@@ -190,7 +190,7 @@ public class ShipPlacementTests
     {
         var problems = Library.Problems(Specs);
         Assert.IsEmpty(problems, string.Join("\n", problems));
-        Assert.AreEqual(41, Library.All.Count());
+        Assert.AreEqual(42, Library.All.Count());
         foreach (var spec in Specs)
             Assert.GreaterOrEqual(Library.For(spec.id).Max(t => t.sockets.Count), Math.Min(spec.maxConnections, 4), $"{spec.id} needs a variant with enough sockets");
     }
@@ -472,10 +472,23 @@ public class ShipPlacementTests
     [Test]
     public void AMisalignedDirectConnectionIsCaught()
     {
-        var (_, p) = Placed(Enumerable.Range(0, 40).First(s => Placed(s).placement.layout.connections.Any(k => k.mode == ConnectionMode.Direct)));
-        var l = Copy(p.layout);
-        var c = l.connections.First(k => k.mode == ConnectionMode.Direct);
-        l.rooms[c.nodeB].origin += new Int2(0, 1);
+        // Placement rarely chooses a direct connection, so build one: two mess halls touching through east and west sockets.
+        var t = Library.For("mess_hall")[0];
+        var g = new ShipGraph();
+        var spec = Specs.First(x => x.id == "mess_hall");
+        g.AddNode(spec, ShipSector.Crew, 0, 0);
+        g.AddNode(spec, ShipSector.Crew, 0, 1);
+        g.AddEdge(0, 1);
+        int east = t.sockets.FindIndex(x => x.side == GridSide.East), west = t.sockets.FindIndex(x => x.side == GridSide.West);
+        var a = new RoomPlacement { node = 0, template = t, origin = new Int2(0, 0) };
+        var b = new RoomPlacement { node = 1, template = t, origin = a.OutsideCell(east) - t.SocketCell(west, 0) };
+        var l = new ShipLayout { graph = g, settings = new PlacementSettings() };
+        l.rooms.Add(a);
+        l.rooms.Add(b);
+        l.connections.Add(new PhysicalConnection { edge = 0, edgeId = g.edges[0].id, nodeA = 0, socketA = east, nodeB = 1, socketB = west, mode = ConnectionMode.Direct });
+        l.ComputeBounds();
+        Assert.IsFalse(Validate(l).Has(LayoutIssueCode.SocketMisaligned), "aligned to start with");
+        l.rooms[1].origin += new Int2(0, 1);
         Assert.IsTrue(Validate(l).Has(LayoutIssueCode.SocketMisaligned));
     }
 

@@ -256,7 +256,8 @@ public class EscapeScenarioTests
     [Test]
     public void RoundChoicesAreIdempotentOrderIndependentAndVaried()
     {
-        var sc = Scenario(2, 1).scenario;
+        int lay = Enumerable.Range(0, 30).First(l => Scenario(l, 1).scenario.items.Any(i => i.kind == ItemKind.Keycard));
+        var sc = Scenario(lay, 1).scenario;
         foreach (int seed in new[] { 0, 1, 77, int.MaxValue, -5 })
         {
             Assert.AreEqual(sc.ForRound(seed).Canonical(), sc.ForRound(seed).Canonical(), "resetting twice gives the same round");

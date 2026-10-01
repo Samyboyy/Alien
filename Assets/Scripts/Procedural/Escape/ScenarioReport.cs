@@ -55,8 +55,12 @@ public static class ScenarioReport
         sb.AppendLine();
         sb.AppendLine("Intended solutions");
         foreach (var p in r.solve.plans)
-            sb.AppendLine($"  {N(p.podNode)} ({p.mode}{(p.status == PodStatus.Damaged ? ", damaged" : "")}): {p.hops} rooms away; gates on the shortest-gate route: " +
-                          (p.gates.Count == 0 ? "none" : string.Join(", ", p.gates.Select(x => $"{g.edges[x.edge].id} via {x.easiest}"))) + (p.needsPower ? "; needs power" : ""));
+        {
+            sb.AppendLine($"  Route to {N(p.podNode)} ({p.mode}{(p.status == PodStatus.Damaged ? ", damaged" : "")}): pressure {p.pressure:0.0}; {p.hops} rooms; {p.stages} step(s); {p.loudActions} loud action(s); gates: " +
+                          (p.gates.Count == 0 ? "none" : string.Join(", ", p.gates.Select(x => $"{g.edges[x.edge].id} via {x.easiest}"))));
+            if (p.requirements.Count > 0) sb.AppendLine("    requires: " + string.Join("; ", p.requirements));
+            if (p.breakdown.Count > 0) sb.AppendLine("    pressure: " + string.Join(", ", p.breakdown.Select(b => $"{b.what} {b.value:0.0}")));
+        }
         sb.AppendLine("Route choices");
         foreach (var c in r.solve.choices) sb.AppendLine("  " + c);
         if (r.attempts > 1)

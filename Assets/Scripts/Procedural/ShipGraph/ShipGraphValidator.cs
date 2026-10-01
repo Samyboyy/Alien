@@ -65,6 +65,7 @@ public sealed class ShipGraphValidator
             specOf[i] = spec;
             if (!spec.AllowsSector(n.sector)) Error(GraphIssueCode.SectorNotPermitted, $"{n.id} is in the {n.sector} sector, which its definition does not allow", i);
             if (n.deck < 0 || n.deck >= s.deckCount || (spec.deck >= 0 && spec.deck != n.deck)) Error(GraphIssueCode.DeckNotPermitted, $"{n.id} is on deck {n.deck}", i);
+            if (spec.requiresVerticalConnection && s.deckCount <= 1) Error(GraphIssueCode.RequiresMultiDeck, $"{n.id} connects decks, but this ship has a single deck", i);
         }
         foreach (var spec in specs)
         {
@@ -97,6 +98,13 @@ public sealed class ShipGraphValidator
             var role = RoomSpec.RoleForDegree(deg);
             if (!spec.Allows(role)) Error(GraphIssueCode.RoleNotPermitted, $"{N(i)} is a {role} ({deg} connections); its definition allows {spec.roles}", i);
             if (deg == 1 && !spec.mayBeDeadEnd) Error(GraphIssueCode.DeadEndNotAllowed, $"{N(i)} is a dead end, which its definition does not allow", i);
+            if (spec.onlyNeighbours.Length > 0)
+                foreach (int j in g.nodes[i].neighbours)
+                    if (!spec.onlyNeighbours.Contains(g.nodes[j].category))
+                        Error(GraphIssueCode.NeighbourNotAllowed, $"{N(i)} opens onto {N(j)}; it may only connect to {string.Join("/", spec.onlyNeighbours)}", i, j);
+            foreach (var need in spec.requiredNeighbours)
+                if (!g.nodes[i].neighbours.Any(j => g.nodes[j].category == need))
+                    Error(GraphIssueCode.RequiredNeighbourMissing, $"{N(i)} has no {need} next to it", i);
             foreach (int j in g.nodes[i].neighbours)
                 if (j > i && specOf[j] != null && (spec.forbiddenNeighbours.Contains(g.nodes[j].category) || specOf[j].forbiddenNeighbours.Contains(g.nodes[i].category)))
                     Error(GraphIssueCode.ForbiddenNeighbour, $"{N(i)} and {N(j)} must not be neighbours", i, j);

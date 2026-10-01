@@ -12,6 +12,16 @@ public static class ScenarioSceneValidator
 {
     public static void Check(PhysicalReport rep, GeneratedShip ship)
     {
+        // Stale or duplicated generated content, and missing scripts.
+        if (SceneScope.All<GeneratedShip>().Length != 1) rep.errors.Add($"{SceneScope.All<GeneratedShip>().Length} GeneratedShip roots in the scene (expected exactly 1): rebuild the scene");
+        if (SceneScope.All<RoundManager>().Length > 1) rep.errors.Add($"{SceneScope.All<RoundManager>().Length} RoundManagers in the scene (expected 1)");
+        int scenarioRoots = ship.transform.Cast<Transform>().Count(t => t.name == "Escape Scenario");
+        if (scenarioRoots > 1) rep.errors.Add($"{scenarioRoots} 'Escape Scenario' groups under the ship (expected 1)");
+        int missing = 0;
+        foreach (var go in SceneScope.All<Transform>().Select(t => t.gameObject))
+            missing += UnityEditor.GameObjectUtility.GetMonoBehavioursWithMissingScriptCount(go);
+        if (missing > 0) rep.errors.Add($"{missing} missing script reference(s) in the scene (a component whose script no longer exists)");
+
         var rooms = ship.GetComponentsInChildren<PlacedRoom>(true).OrderBy(r => r.nodeIndex).ToArray();
         if (rooms.Length == 0 || rooms.Length != ship.nodes.Count) return; // the layout checks already reported this
         var graph = ship.ToGraph();
@@ -130,7 +140,18 @@ public static class ScenarioSceneValidator
             var sim = OnePlayerSimulator.CanEscape(graph, sc.ForRound(round * 7919 + 1), 250000);
             if (!sim.escaped) { rep.errors.Add($"scenario: for round seed {round * 7919 + 1} one player with one item slot cannot escape"); break; }
         }
-        rep.info.Add($"scenario in the scene: {sc.gates.Count} door(s), {sc.pods.Count} pod(s), {sc.items.Count(i => i.critical)} critical and {sc.items.Count(i => i.optional)} optional item(s); solved in {res.stages} stages with {res.plans.Count} plan(s)");
+        int noisemakers = SceneScope.All<NoisemakerPickup>().Length;
+        rep.info.Add($"scenario in the scene: {sc.gates.Count} door(s), {sc.pods.Count} pod(s), {sc.items.Count(i => i.critical)} critical item(s), {sc.items.Count(i => i.optional)} optional item(s) and {noisemakers} noisemaker pickup(s); {res.stages} progression stage(s), {res.plans.Count} plan(s)");
+
+        // The pressure budget on what is really in the scene (default budget: the scene does not record the settings it was built with).
+        var ps = new PressureSettings();
+        foreach (var plan in res.plans)
+        {
+            RoutePressure.Assess(graph, sc, plan, ps);
+            string line = $"route to {graph.nodes[plan.podNode].id}: pressure {plan.pressure:0.0} ({string.Join(", ", plan.breakdown.Select(b => $"{b.what} {b.value:0.0}"))})";
+            if (plan.pressure < ps.minimum) rep.errors.Add($"scenario: {line} is below the minimum {ps.minimum:0.0} (a trivially direct escape)");
+            else rep.info.Add(line);
+        }
 
         // Every in-scene NetworkObject needs a unique non-zero hash (they are computed when the scene is saved).
         var seen = new HashSet<uint>();

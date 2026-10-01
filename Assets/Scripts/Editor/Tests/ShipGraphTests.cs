@@ -323,13 +323,19 @@ public class ShipGraphTests
     [Test]
     public void ProximityRulesAreCheckedStrictAndSoft()
     {
-        // Workshop must be within 2 of Cargo, Engineering or Maintenance: move it far away (re-hang it from the Bridge's host).
-        var (g, v) = Valid();
-        int workshop = g.FirstOf(RoomCategory.Workshop);
-        foreach (int nb in g.nodes[workshop].neighbours.ToList()) g.RemoveEdge(workshop, nb);
-        g.AddEdge(workshop, g.route[0]);
+        // The Mess Hall must be within 2 of a Crew Quarters (strict): move every crew quarters to the bow, far from the mess. A ship whose crew
+        // quarters are all dead ends is used, so moving them keeps the ship connected.
+        var gen = Gen();
+        var g = Enumerable.Range(0, 200).Select(gen.Generate)
+            .First(x => x.graph.AllOf(RoomCategory.CrewQuarters).All(c => x.graph.nodes[c].Degree == 1)).graph.Clone();
+        var v = gen.Validator;
+        foreach (int crew in g.AllOf(RoomCategory.CrewQuarters))
+        {
+            foreach (int nb in g.nodes[crew].neighbours.ToList()) g.RemoveEdge(crew, nb);
+            g.AddEdge(crew, g.route[0]);
+        }
         var rep = v.Validate(g);
-        Assert.IsTrue(rep.Has(GraphIssueCode.ProximityRequired));
+        Assert.IsTrue(rep.Has(GraphIssueCode.ProximityRequired), string.Join(System.Environment.NewLine, rep.issues));
         Assert.AreEqual(IssueSeverity.Error, rep.issues.First(i => i.code == GraphIssueCode.ProximityRequired).severity);
     }
 
@@ -367,7 +373,7 @@ public class ShipGraphTests
         var specs = DefaultRoomCatalogue.Create();
         Assert.AreEqual(specs.Count, specs.Select(s => s.id).Distinct().Count(), "ids are unique");
         Assert.AreEqual(System.Enum.GetValues(typeof(RoomCategory)).Length, specs.Select(s => s.category).Distinct().Count(), "every category has a definition");
-        Assert.AreEqual(11, specs.Count(s => s.tier == RoomTier.Mandatory));
+        Assert.AreEqual(12, specs.Count(s => s.tier == RoomTier.Mandatory), "the 11 required rooms and the escape access");
         Assert.AreEqual(14, specs.Count(s => s.tier == RoomTier.Specialised));
         Assert.AreEqual(10, specs.Count(s => s.tier == RoomTier.Structural));
         foreach (var s in specs)

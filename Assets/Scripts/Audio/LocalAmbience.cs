@@ -2,13 +2,13 @@ using UnityEngine;
 
 /// <summary>
 /// The local player's ambience (owner only, added at runtime by NetworkFirstPersonController when an AudioBank exists):
-///  - the constant background atmosphere;
+///  - the ship's layered room tone (ShipRoomTone) and the listener's room acoustics (ShipAcoustics), added from here;
 ///  - the tension riser (see TensionRiser), driven by how near the creature is;
 ///  - a subtle heartbeat that speeds up as the creature gets closer (each beat is cut from the clip and scheduled, so it can
 ///    go from slow to fast without pitch-shifting);
 ///  - breathing: out-of-breath when stamina runs low, scared when the creature is near or chasing. Only ONE breathing voice
 ///    ever sounds (BreathFader): a change fades the old one out completely before the new one starts.
-/// Nearness is smoothed, and walls muffle it rather than silence it. Purely cosmetic; everything but the atmosphere is silent
+/// Nearness is smoothed, and walls muffle it rather than silence it. Purely cosmetic; everything but the room tone is silent
 /// while dead, in the lobby and after the round.
 /// </summary>
 public class LocalAmbience : MonoBehaviour
@@ -16,7 +16,7 @@ public class LocalAmbience : MonoBehaviour
     NetworkFirstPersonController controller;
     PlayerLife life;
     AudioBank bank;
-    AudioSource atmos, heartSource, scaredSource, runSource;
+    AudioSource heartSource, scaredSource, runSource;
     AudioClip beat;
     TensionRiser riser;
     CreatureAI creature;
@@ -32,10 +32,6 @@ public class LocalAmbience : MonoBehaviour
         life = GetComponent<PlayerLife>();
         if (bank == null) { enabled = false; return; }
 
-        atmos = MakeSource("Atmos", bank.atmos, true, AudioCategory.Ambience);
-        atmos.volume = bank.atmosVolume * AudioRouting.Volume(AudioCategory.Ambience);
-        if (atmos.clip != null) atmos.Play();
-
         if (bank.tensionRiser != null) riser = new TensionRiser(bank, gameObject);
 
         heartSource = MakeSource("Heartbeat", null, false, AudioCategory.Internal);
@@ -45,8 +41,9 @@ public class LocalAmbience : MonoBehaviour
         scaredSource = MakeSource("Scared Breathing", bank.scaredBreath, true, AudioCategory.Internal);
         runSource = MakeSource("Run Breathing", bank.runBreath, true, AudioCategory.Internal);
 
-        // The ship's room acoustics for this listener (reverb, the crawlspace's muffling, ambience level per space).
+        // The ship's room acoustics for this listener (reverb, the crawlspace's muffling, ambience level per space), and its room tone.
         if (GetComponent<ShipAcoustics>() == null) gameObject.AddComponent<ShipAcoustics>().Begin();
+        if (GetComponent<ShipRoomTone>() == null) gameObject.AddComponent<ShipRoomTone>().Begin();
     }
 
     // Flat (2D), not tied to any position, and dry (Ambience/Internal bypass the room reverb).
@@ -65,7 +62,6 @@ public class LocalAmbience : MonoBehaviour
 
     void OnDestroy()
     {
-        if (atmos != null) Destroy(atmos.gameObject);
         if (heartSource != null) Destroy(heartSource.gameObject);
         if (scaredSource != null) Destroy(scaredSource.gameObject);
         if (runSource != null) Destroy(runSource.gameObject);
@@ -77,7 +73,6 @@ public class LocalAmbience : MonoBehaviour
     {
         if (bank == null) return;
         float dt = Time.deltaTime;
-        atmos.volume = bank.atmosVolume * ShipAcoustics.AmbientLevel * AudioRouting.Volume(AudioCategory.Ambience); // live tuning, louder in the machinery rooms
         bool on = RoundManager.IsActive && (life == null || life.IsAlive);
 
         if ((sampleTimer -= dt) <= 0f)

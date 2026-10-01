@@ -99,6 +99,7 @@ public static class AudioSetup
         so.ApplyModifiedProperties();
         EditorUtility.SetDirty(bank);
         AssetDatabase.SaveAssets();
+        AcousticPolish.PolishBank(bank); // room tone, crackle, calls, chase snarl and every acoustic profile (only what is still unset)
 
         Debug.Log($"Audio bank ready: {steps.Count} monster footsteps, riser peak at {bank.riserPeakSeconds:0.0} s. Volumes and tuning live on {BankPath}.");
         if (missing.Count > 0) Debug.LogError($"Audio clips not found in {Folder}: {string.Join(", ", missing)}");

@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -52,8 +53,57 @@ public static partial class ShipBuilder
         int added = 0;
         added += AddRoomLinks();
         if (GameObject.Find(VentRoot) == null) { BuildVentilation(); added++; }
-        else Debug.Log($"'{VentRoot}' already in the scene - left as it is.");
+        else
+        {
+            Debug.Log($"'{VentRoot}' already in the scene - left as it is.");
+            added += RepairVentEntrances();
+        }
         return added;
+    }
+
+    /// <summary>
+    /// Restores the vent mouths' data in the open scene. CreatureVentEntrance used to live in CreatureVentNetwork.cs, so Unity stored it
+    /// through a scene-embedded script reference and could drop its fields (id, room, approach, face, inside, top) when the scene was
+    /// re-saved. It now has its own file; this re-links each "Vent Entrance N Room" object to its own child points and room, replaces a
+    /// component whose script can no longer be found, and rebuilds the network's entrance list in id order. Values that are still set
+    /// are left alone. Returns how many entrances were repaired.
+    /// </summary>
+    internal static int RepairVentEntrances()
+    {
+        var root = GameObject.Find(VentRoot);
+        var net = root != null ? root.GetComponent<CreatureVentNetwork>() : null;
+        if (net == null) return 0;
+        var rooms = new Dictionary<string, RoomVolume>();
+        foreach (var r in Object.FindObjectsByType<RoomVolume>(FindObjectsSortMode.None)) rooms[r.roomName] = r;
+
+        int repaired = 0;
+        var entrances = new List<CreatureVentEntrance>();
+        foreach (Transform child in root.transform)
+        {
+            var m = Regex.Match(child.name, @"^Vent Entrance (\d+) (\w+)$");
+            if (!m.Success) continue;
+            int id = int.Parse(m.Groups[1].Value);
+            bool changed = GameObjectUtility.RemoveMonoBehavioursWithMissingScript(child.gameObject) > 0;
+            var e = child.GetComponent<CreatureVentEntrance>();
+            if (e == null) { e = child.gameObject.AddComponent<CreatureVentEntrance>(); changed = true; }
+            if (e.id != id) { e.id = id; changed = true; }
+            if (e.approach == null) { e.approach = child.Find("Approach"); changed = true; }
+            if (e.face == null) { e.face = child.Find("Face"); changed = true; }
+            if (e.inside == null) { e.inside = child.Find("Inside"); changed = true; }
+            if (e.top == null) { e.top = child.Find("Top"); changed = true; }
+            if (e.room == null && rooms.TryGetValue(m.Groups[2].Value, out var room)) { e.room = room; changed = true; }
+            if (changed) { EditorUtility.SetDirty(e); repaired++; }
+            entrances.Add(e);
+        }
+        entrances.Sort((a, b) => a.id.CompareTo(b.id));
+        if (!net.entrances.SequenceEqual(entrances))
+        {
+            net.entrances = entrances.ToArray();
+            EditorUtility.SetDirty(net);
+            if (repaired == 0) repaired = 1;
+        }
+        if (repaired > 0) Debug.Log($"Vent entrances: {repaired} repaired (data re-linked from their own child points; the class now has its own script file).");
+        return repaired;
     }
 
     // ---------- Room links ----------
@@ -283,7 +333,8 @@ public static partial class ShipBuilder
         for (int i = 0; i < net.EntranceCount; i++)
         {
             var e = net.entrances[i];
-            if (e == null || e.approach == null) { problems++; continue; }
+            if (e == null || e.approach == null || e.face == null || e.inside == null || e.top == null)
+            { problems++; Debug.LogError($"Vent entrance slot {i} has lost its data: run Alien > Add Creature Ventilation (it repairs the entrances)."); continue; }
             if (!OnMesh(e.approach.position, 0.5f)) { problems++; Debug.LogError($"{e.name}: its approach point is off the NavMesh.", e); }
             Vector3 p = e.approach.position;
             if (Physics.CheckCapsule(p + Vector3.up * 0.55f, p + Vector3.up * 1.45f, 0.4f, ~0, QueryTriggerInteraction.Ignore))

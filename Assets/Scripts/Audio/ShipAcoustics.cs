@@ -1,13 +1,17 @@
 using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 /// <summary>
-/// The local listener's room acoustics (owner only; added at runtime with the player's ambience). One Audio Reverb Zone travels with
-/// the listener, so the room shape does not matter; a few times a second it looks up which acoustic zone the listener is in and
-/// blends the reverb towards that space's profile (AudioBank) over the profile's transition time, so doorways are smooth. Sounds in
-/// the Ambience and Internal categories bypass it (they stay dry), your own footsteps get a lighter share (AudioRouting).
+/// The local listener's LATE room reverb (owner only; added at runtime with the player's ambience). One Audio Reverb Zone travels with
+/// the listener, so the room shape does not matter; a few times a second it looks up which acoustic zone the listener is in and blends
+/// the reverb towards that space's profile (AudioBank) over the profile's transition time, so doorways are smooth. Sounds in the Ambience
+/// and Internal categories bypass it (they stay dry), your own footsteps get a lighter share (AudioRouting). The close-range early
+/// reflections are a separate, per-emitter layer (EmitterAcoustics); the persistent room tone is ShipRoomTone.
 /// Also publishes, for the occlusion of world sounds, an upper cutoff for the current space (the crawlspace is boxy and muffled) and an
 /// ambience level. No network traffic: every player instance does this for its own listener.
+/// F4 toggles the audio diagnostics (development aid; off by default).
 /// </summary>
 public class ShipAcoustics : MonoBehaviour
 {
@@ -16,14 +20,24 @@ public class ShipAcoustics : MonoBehaviour
     /// <summary>Multiplier on the background ambience in the current space.</summary>
     public static float AmbientLevel { get; private set; } = 1f;
     public static AcousticSpace CurrentSpace { get; private set; } = AcousticSpace.Neutral;
+    /// <summary>Linear level of the current late reverb (from the zone's room setting), for diagnostics.</summary>
+    public static float LateLevel { get; private set; }
+    /// <summary>F4: show the audio and tracker diagnostics.</summary>
+    public static bool DiagnosticsVisible { get; set; }
+    /// <summary>Editor preview only (Alien > Audio > Acoustic Preview): forces the listener's space.</summary>
+    public static bool PreviewActive { get; set; }
+    public static AcousticSpace PreviewSpace { get; set; }
 
     const int Count = 13; // room, roomHF, roomLF, decay, decayHF, reflections, reflDelay, reverb, revDelay, diffusion, density, cutoffCap, ambient
     readonly float[] current = new float[Count], target = new float[Count];
     readonly List<bool> contains = new();
     readonly List<int> priorities = new();
+    readonly StringBuilder diag = new();
     AudioReverbZone zone;
     AudioBank bank;
-    float timer, transition = 0.8f;
+    GUIStyle diagStyle;
+    float timer, transition = 0.8f, diagTimer;
+    string diagText = "";
 
     public void Begin()
     {
@@ -44,19 +58,29 @@ public class ShipAcoustics : MonoBehaviour
     void OnDestroy()
     {
         if (zone != null) Destroy(zone.gameObject);
+        ResetStatics();
+    }
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    static void ResetStatics()
+    {
         WorldCutoffCap = 22000f;
         AmbientLevel = 1f;
         CurrentSpace = AcousticSpace.Neutral;
+        LateLevel = 0f;
+        PreviewActive = false;
     }
 
     void Update()
     {
         if (zone == null) return;
+        var kb = Keyboard.current;
+        if (kb != null && kb.f4Key.wasPressedThisFrame) DiagnosticsVisible = !DiagnosticsVisible;
         float dt = Time.deltaTime;
         if ((timer -= dt) <= 0f)
         {
             timer = 0.2f;
-            var space = SpaceAt(zone.transform.position);
+            var space = PreviewActive ? PreviewSpace : SpaceAt(zone.transform.position);
             var profile = bank.Profile(space);
             CurrentSpace = space;
             Fill(target, profile);
@@ -90,18 +114,62 @@ public class ShipAcoustics : MonoBehaviour
 
     void Apply()
     {
-        zone.room = Mathf.RoundToInt(current[0]);
-        zone.roomHF = Mathf.RoundToInt(current[1]);
-        zone.roomLF = Mathf.RoundToInt(current[2]);
-        zone.decayTime = Mathf.Max(0.1f, current[3]);
-        zone.decayHFRatio = Mathf.Clamp(current[4], 0.1f, 2f);
-        zone.reflections = Mathf.RoundToInt(current[5]);
-        zone.reflectionsDelay = Mathf.Clamp(current[6], 0f, 0.3f);
-        zone.reverb = Mathf.RoundToInt(current[7]);
-        zone.reverbDelay = Mathf.Clamp(current[8], 0f, 0.1f);
-        zone.diffusion = Mathf.Clamp(current[9], 0f, 100f);
-        zone.density = Mathf.Clamp(current[10], 0f, 100f);
+        ApplyTo(zone, current);
         WorldCutoffCap = Mathf.Clamp(current[11], 500f, 22000f);
         AmbientLevel = Mathf.Max(0f, current[12]);
+        LateLevel = Mathf.Pow(10f, current[0] / 2000f);
+    }
+
+    static void ApplyTo(AudioReverbZone z, float[] v)
+    {
+        z.room = Mathf.RoundToInt(v[0]);
+        z.roomHF = Mathf.RoundToInt(v[1]);
+        z.roomLF = Mathf.RoundToInt(v[2]);
+        z.decayTime = Mathf.Max(0.1f, v[3]);
+        z.decayHFRatio = Mathf.Clamp(v[4], 0.1f, 2f);
+        z.reflections = Mathf.RoundToInt(v[5]);
+        z.reflectionsDelay = Mathf.Clamp(v[6], 0f, 0.3f);
+        z.reverb = Mathf.RoundToInt(v[7]);
+        z.reverbDelay = Mathf.Clamp(v[8], 0f, 0.1f);
+        z.diffusion = Mathf.Clamp(v[9], 0f, 100f);
+        z.density = Mathf.Clamp(v[10], 0f, 100f);
+    }
+
+    /// <summary>Sets a reverb zone straight to a profile (the editor preview uses this for a listener without a player).</summary>
+    public static void ApplyProfile(AudioReverbZone z, AudioBank.AcousticProfile p)
+    {
+        var v = new float[Count];
+        Fill(v, p);
+        z.reverbPreset = AudioReverbPreset.User;
+        ApplyTo(z, v);
+    }
+
+    // ---------- Diagnostics (F4; built at most twice a second, only while visible) ----------
+
+    void OnGUI()
+    {
+        if (!DiagnosticsVisible || zone == null) return;
+        if ((diagTimer -= Time.unscaledDeltaTime) <= 0f)
+        {
+            diagTimer = 0.5f;
+            int emitters = EmitterAcoustics.All.Count, voices = 0, reflecting = 0;
+            foreach (var e in EmitterAcoustics.All)
+            {
+                voices += e.PlayingVoices();
+                if (e.HasReflectionSlot) reflecting++;
+            }
+            diag.Clear();
+            diag.Append("AUDIO (F4)  space ").Append(CurrentSpace).Append(PreviewActive ? " [preview]" : "")
+                .Append("  late tail ").Append(LateLevel.ToString("0.00"))
+                .Append("  world cutoff cap ").Append(WorldCutoffCap.ToString("0")).Append(" Hz\n")
+                .Append("emitters ").Append(emitters).Append(", playing voices ").Append(voices)
+                .Append(", reflection slots ").Append(EmitterAcoustics.ReflectionSlotsInUse).Append('/').Append(EmitterAcoustics.ReflectionSlotsCapacity)
+                .Append(" (").Append(reflecting).Append(" emitters)\n");
+            var tone = GetComponent<ShipRoomTone>();
+            if (tone != null) tone.Describe(diag);
+            diagText = diag.ToString();
+        }
+        diagStyle ??= new GUIStyle(GUI.skin.label) { fontSize = 12, normal = { textColor = new Color(0.75f, 0.95f, 1f) } };
+        GUI.Label(new Rect(20, 120, 900, 90), diagText, diagStyle);
     }
 }

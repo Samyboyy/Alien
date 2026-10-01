@@ -50,6 +50,7 @@ public partial class CreatureAI
         public HidingSpot tipSpot;          // tip only: spot of the latest entry, and whether the creature was watching it
         public bool tipSawEnter;
         public double heardTime = double.NegativeInfinity, lastConfirmed = double.NegativeInfinity;
+        public bool heardTracker;           // the last sound heard from this player was its motion tracker (for the death tip)
         public bool bySound;                // the current detection started from this player's audible sound
     }
 
@@ -248,9 +249,18 @@ public partial class CreatureAI
         if (s.spot != null)
         {
             if (s.tipSawEnter && s.tipSpot == s.spot) return DetectionReason.SawEnterSpot;
-            return s.bySound ? DetectionReason.FootstepsLedHere : DetectionReason.VisibleThroughOpening;
+            return s.bySound ? SoundReason(s) : DetectionReason.VisibleThroughOpening;
         }
-        return s.bySound ? DetectionReason.FootstepsLedHere : s.lastConfirmed > double.NegativeInfinity ? DetectionReason.SeenInOpen : DetectionReason.Unknown;
+        return s.bySound ? SoundReason(s) : s.lastConfirmed > double.NegativeInfinity ? DetectionReason.SeenInOpen : DetectionReason.Unknown;
+    }
+
+    static DetectionReason SoundReason(PlayerSight s) => s.heardTracker ? DetectionReason.TrackerLedHere : DetectionReason.FootstepsLedHere;
+
+    void NoteHeard(ulong emitter, SoundKind kind, double now)
+    {
+        var s = Sight(emitter);
+        s.heardTime = now;
+        s.heardTracker = kind == SoundKind.Tracker;
     }
 
     void Capture(NetworkFirstPersonController p)

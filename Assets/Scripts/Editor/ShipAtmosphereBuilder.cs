@@ -276,7 +276,13 @@ public static partial class ShipBuilder
 
     // ---------- Acoustic zones ----------
 
-    static AcousticSpace RoomSpace(string room) => room is "Engine" or "Cargo" or "Storage" ? AcousticSpace.LargeMachinery : AcousticSpace.SmallRoom;
+    // The engine room is machinery; the two big holds are large open spaces (Alien > Apply Acoustic Polish migrates older scenes).
+    internal static AcousticSpace RoomSpace(string room) => room switch
+    {
+        "Engine" => AcousticSpace.LargeMachinery,
+        "Cargo" or "Storage" => AcousticSpace.LargeOpen,
+        _ => AcousticSpace.SmallRoom,
+    };
 
     static void BuildAcousticZones()
     {
@@ -362,8 +368,11 @@ public static partial class ShipBuilder
                 }
             Debug.Log($"Acoustic zones: {zones.Length}; {fallbackCells} walkable cells (doorways, short stubs) use the fallback profile.");
             if (bank != null)
-                foreach (var space in zones.Select(z => z.space).Distinct().Append(bank.fallbackSpace))
+                foreach (var space in zones.Select(z => z.space).Distinct().Append(bank.fallbackSpace).Append(AcousticSpace.Duct))
+                {
                     if (bank.Profile(space) == null) { problems++; Debug.LogError($"AudioBank has no acoustic profile for {space}."); }
+                    else if (!bank.HasOwnProfile(space)) { warnings++; Debug.LogWarning($"AudioBank has no tunable profile for {space} (built-in defaults used): run Alien > Apply Acoustic Polish."); }
+                }
         }
 
         // Lights: within the documented budget.
@@ -392,6 +401,7 @@ public static partial class ShipBuilder
         var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(PrototypeSetup.PrefabPath);
         int prefabListeners = prefab != null ? prefab.GetComponentsInChildren<AudioListener>(true).Length : 0;
         if (prefabListeners != 1) { problems++; Debug.LogError($"Player prefab has {prefabListeners} AudioListeners; it needs exactly one."); }
+        if (prefab != null && prefab.GetComponent<PlayerMotionTracker>() == null) { warnings++; Debug.LogWarning("Player prefab has no PlayerMotionTracker: run Alien > Add Motion Tracker."); }
         int sceneListeners = Object.FindObjectsByType<AudioListener>(FindObjectsInactive.Include, FindObjectsSortMode.None).Length;
         if (sceneListeners > 1) { warnings++; Debug.LogWarning($"The scene has {sceneListeners} AudioListeners; only the lobby camera should have one."); }
 
@@ -410,6 +420,11 @@ public static partial class ShipBuilder
             if (bank.ventTravel == null) missing.Add("vent travel (silent)");
             if (bank.ventWarning == null) missing.Add("vent warning (door fallback used)");
             if (bank.ventExit == null) missing.Add("vent exit (door fallback used)");
+            if (bank.airTone == null) missing.Add("air room tone");
+            if (bank.flickerCrackle == null) missing.Add("flicker crackle (lights silent)");
+            if (bank.roamCall == null) missing.Add("roaming call");
+            if (bank.trackerBeep == null) missing.Add("tracker beep (generated stand-in used)");
+            if (bank.atmos != null && bank.atmosLoop == Vector2.zero) missing.Add("atmos loop region (whole clip loops, including its fade-out)");
             if (missing.Count > 0) { warnings++; Debug.LogWarning($"Audio clips not set: {string.Join(", ", missing)}."); }
         }
 

@@ -114,7 +114,7 @@ public static partial class ShipBuilder
         try
         {
             bool changed = Ensure<PlayerInteractor>(root) | Ensure<PlayerLife>(root) | Ensure<LocalSpectator>(root)
-                | Ensure<PlayerInventory>(root) | Ensure<FootstepNoise>(root) | Ensure<ThreatVisuals>(root);
+                | Ensure<PlayerInventory>(root) | Ensure<FootstepNoise>(root) | Ensure<ThreatVisuals>(root) | Ensure<PlayerMotionTracker>(root);
             if (!changed) return;
             PrefabUtility.SaveAsPrefabAsset(root, PrototypeSetup.PrefabPath);
             Debug.Log("Player prefab: added escape-system components.");

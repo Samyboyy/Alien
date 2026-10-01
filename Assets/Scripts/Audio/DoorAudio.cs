@@ -21,7 +21,7 @@ public class DoorAudio : MonoBehaviour
         var door = GetComponent<SlidingDoor>();
         emitter.transform.position = door != null ? door.ClosedPosition : transform.position; // the doorway, even for a late joiner who sees it open
         pool = new SfxPool(emitter, 2, AudioCategory.World, 1f, bank.doorMaxDistance, customRolloff: AudioRouting.Rolloff(bank.doorFullDistance, bank.doorMaxDistance));
-        var occlusion = emitter.AddComponent<AudioOcclusion>();
+        var occlusion = emitter.AddComponent<EmitterAcoustics>();
         occlusion.ignoreRoot = transform; // the door's own slab never muffles its own sound
         occlusion.maxRange = bank.doorMaxDistance + 2f;
         occlusion.Attach(pool);

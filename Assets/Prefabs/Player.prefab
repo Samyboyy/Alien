@@ -201,6 +201,7 @@ GameObject:
   - component: {fileID: 2927099109131224874}
   - component: {fileID: 7393328312955687101}
   - component: {fileID: 3188594096239349523}
+  - component: {fileID: 1483427648982236349}
   m_Layer: 0
   m_Name: Player
   m_TagString: Untagged
@@ -460,8 +461,42 @@ MonoBehaviour:
   fadeOutSpeed: 0.7
   nearDistance: 3
   farDistance: 12
+  facingInfluence: 0.25
   coverRelief: 0.25
   chaseBonus: 0.1
   previewEnabled: 0
   preview: 1
   currentIntensity: 0
+--- !u!114 &1483427648982236349
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9133172698758382489}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cd6b4742c454d6a4ca41a2d1542cc559, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerMotionTracker
+  ShowTopMostFoldoutHeaderGroup: 1
+  range: 28
+  motionThreshold: 0.35
+  detectTeammates: 1
+  structureFactor: 0.45
+  structurePeriod: 1.7
+  structureDuty: 0.45
+  nearAngleError: 4
+  farAngleError: 24
+  nearDistanceError: 0.05
+  farDistanceError: 0.3
+  displayFollow: 5
+  fastestInterval: 0.32
+  slowestInterval: 1.25
+  idleInterval: 1.8
+  firstBeepDelay: 0.35
+  beepNoiseRange: 6
+  maxBeepNoiseRange: 8
+  hostMinBeepInterval: 0.25
+  dialSize: 0.26
+  blipFade: 2.4

@@ -111,6 +111,7 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
     float lastSoundStrength;
     double lastSoundTime;
     string reason = "-"; // debug: why the state last changed
+    CreatureAudio sound; // cosmetic, on every peer; null without an AudioBank
 
     /// <summary>Replicated behaviour state, readable on every peer (used by the cosmetic CreatureAudio).</summary>
     public CreatureState CurrentState => state.Value;
@@ -140,7 +141,7 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
         ventPhase.OnValueChanged += OnVentPhaseChanged;
         ApplyVentVisuals(ventPhase.Value); // a late joiner sees the right body state at once
         Tint(state.Value);
-        if (AudioBank.Get() != null && GetComponent<CreatureAudio>() == null) gameObject.AddComponent<CreatureAudio>(); // cosmetic footsteps and snarl
+        if (AudioBank.Get() != null && !TryGetComponent(out sound)) sound = gameObject.AddComponent<CreatureAudio>(); // cosmetic footsteps, voice, vents
 
         agent.enabled = false; // clients never run navigation
         if (!IsServer) return;
@@ -162,7 +163,7 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
     {
         state.OnValueChanged -= OnStateChanged;
         ventPhase.OnValueChanged -= OnVentPhaseChanged;
-        GetComponent<CreatureAudio>()?.StopVentAudio(); // no orphaned duct loop after a despawn or host shutdown
+        if (sound != null) sound.StopVentAudio(); // no orphaned duct loop or vent cue after a despawn or host shutdown
         agent.enabled = false;
     }
 
@@ -196,6 +197,7 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
         if (!agent.enabled || !agent.isOnNavMesh) return;
 
         UpdateAlertness();
+        TickVocals(); // rare, state-aware, cosmetic
 
         // Perception at 10 Hz is plenty and keeps raycasts cheap.
         bool tick = (perceptionTimer -= Time.deltaTime) <= 0f;
@@ -295,12 +297,14 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
 
     void EnterChase(NetworkFirstPersonController p, string why)
     {
+        bool fresh = state.Value != CreatureState.Chase;
         state.Value = CreatureState.Chase;
         reason = why;
         bashDoor = null; // sight interrupts any door attempt (progress is kept)
         agent.speed = chaseSpeed;
         agent.stoppingDistance = Mathf.Min(stopDistance, captureDistance * 0.7f);
         SetTarget(p);
+        if (fresh) OnChaseStarted(); // a short snarl as a chase starts (CreatureAI.Vocal.cs; its own cooldown)
     }
 
     void SetTarget(NetworkFirstPersonController p)
@@ -371,7 +375,7 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
         }
         pos = NavMesh.SamplePosition(pos, out var snap, 4f, NavMesh.AllAreas) ? snap.position : pick.position;
 
-        if (pick.IsPlayerSound) Sight(pick.emitter).heardTime = now; // a sound only, for the death tip; it grants no sight
+        if (pick.IsPlayerSound) NoteHeard(pick.emitter, pick.kind, now); // a sound only, for the death tip; it grants no sight
         lastSound = pick;
         lastSoundStrength = pickStrength;
         lastSoundTime = now;
@@ -486,6 +490,7 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
         aiRng = new System.Random(roundSeed);
         ResetHunting();
         ResetVent(startPos, roundSeed ^ 0x5EED); // cancels any trip, restores collider, body and agent, clears cadence, history and held sounds
+        ResetVocals(roundSeed ^ 0x0C41);
         sights.Clear(); // every player's awareness and detection history
         lastSightTime = Time.timeAsDouble;
         chaseInspectSpot = null;

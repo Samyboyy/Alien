@@ -86,11 +86,21 @@ public partial class CreatureAI
     }
 
     readonly NetworkVariable<VentPhase> ventPhase = new(VentPhase.None);
+    readonly NetworkVariable<double> ventPhaseStart = new(0); // server time the current phase began: a late joiner knows how much of a cue is left
     readonly NetworkVariable<sbyte> ventEntryNet = new(-1); // presentation only: where the entry sounds play
     readonly NetworkVariable<sbyte> ventExitNet = new(-1);  // presentation only: where the warning and exit sounds play
     public VentPhase CurrentVentPhase => ventPhase.Value;
     public int VentEntryId => ventEntryNet.Value;
     public int VentExitId => ventExitNet.Value;
+    /// <summary>Seconds since the current vent phase began (server time, so the same on every peer).</summary>
+    public double VentPhaseElapsed => NetworkManager != null ? NetworkManager.ServerTime.Time - ventPhaseStart.Value : 0;
+
+    // Every phase change goes through here: the start time is written with it (only on a change, never per frame).
+    void SetVentPhase(VentPhase phase)
+    {
+        ventPhaseStart.Value = NetworkManager.ServerTime.Time;
+        ventPhase.Value = phase;
+    }
 
     Renderer[] ventRenderers;
     CapsuleCollider ventCollider;
@@ -146,7 +156,7 @@ public partial class CreatureAI
     void OnVentPhaseChanged(VentPhase previous, VentPhase now)
     {
         ApplyVentVisuals(now);
-        GetComponent<CreatureAudio>()?.OnVentPhase(previous, now);
+        if (sound != null) sound.OnVentPhase(previous, now);
     }
 
     void ApplyVentVisuals(VentPhase phase)
@@ -341,14 +351,14 @@ public partial class CreatureAI
         agent.speed = ResumeSpeed(resume);
         agent.stoppingDistance = 0.4f;
         GoTo(VentNet.entrances[entry].approach.position);
-        ventPhase.Value = VentPhase.Approaching;
+        SetVentPhase(VentPhase.Approaching);
         Debug.Log($"Creature vent: {why}; entrance {entry} to exit {exit}, about {ventPlanSeconds:0.0}s against {ventGroundSeconds:0.0}s on foot. Evidence: {evidenceNote}");
     }
 
     // Before it has committed (agent still on, collider still on): simply stop.
     void CancelVent(string why)
     {
-        ventPhase.Value = VentPhase.None;
+        SetVentPhase(VentPhase.None);
         ventEntryNet.Value = ventExitNet.Value = -1;
         ventCommitted = false;
         ventPending.Clear();
@@ -373,7 +383,7 @@ public partial class CreatureAI
     void ResetVent(Vector3 startPosition, int seed)
     {
         bool wasCommitted = ventCommitted || !agent.enabled;
-        ventPhase.Value = VentPhase.None;
+        SetVentPhase(VentPhase.None);
         ventEntryNet.Value = ventExitNet.Value = -1;
         ventCommitted = false;
         ventHistory.Clear();
@@ -471,7 +481,7 @@ public partial class CreatureAI
         agent.ResetPath();
         agent.velocity = Vector3.zero;
         ventTimer = 0f;
-        ventPhase.Value = VentPhase.Entering;
+        SetVentPhase(VentPhase.Entering);
     }
 
     void UpdateEntryDelay(float dt)
@@ -543,7 +553,7 @@ public partial class CreatureAI
 
         if (phase == VentPhase.Entering)
         {
-            if (ventTravelled >= ventEnterEnd) ventPhase.Value = VentPhase.Travelling;
+            if (ventTravelled >= ventEnterEnd) SetVentPhase(VentPhase.Travelling);
             return;
         }
         if (phase == VentPhase.Exiting)
@@ -562,7 +572,7 @@ public partial class CreatureAI
         {
             if (AdoptPendingSound()) ventEvidenceNote = EvidenceNote(); // heard on the last stretch: it heads there after emerging
             ventTimer = ventWait = 0f;
-            ventPhase.Value = VentPhase.Preparing; // the warning plays at the exit from the phase change, on every peer
+            SetVentPhase(VentPhase.Preparing); // the warning plays at the exit from the phase change, on every peer
         }
     }
 
@@ -609,7 +619,7 @@ public partial class CreatureAI
         ventNextJunction = 0;
         ventExit = newExit;
         ventExitNet.Value = (sbyte)newExit;
-        if (ventPhase.Value != VentPhase.Travelling) ventPhase.Value = VentPhase.Travelling;
+        if (ventPhase.Value != VentPhase.Travelling) SetVentPhase(VentPhase.Travelling);
         return true;
     }
 
@@ -671,7 +681,7 @@ public partial class CreatureAI
         ventPoints.Add(exit.approach.position);
         BuildVentCum();
         ventTravelled = 0f;
-        ventPhase.Value = VentPhase.Exiting; // visible again from here; still inside the wall
+        SetVentPhase(VentPhase.Exiting); // visible again from here; still inside the wall
     }
 
     void Emerge()
@@ -683,7 +693,7 @@ public partial class CreatureAI
         agent.Warp(p);
         if (ventCollider != null) ventCollider.enabled = true;
         ventCommitted = false;
-        ventPhase.Value = VentPhase.None;
+        SetVentPhase(VentPhase.None);
         ventEntryNet.Value = ventExitNet.Value = -1;
         ventPending.Clear();
         lastVentEnd = ventCycleStart = Time.timeAsDouble;

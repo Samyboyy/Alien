@@ -3,7 +3,7 @@ using System.Collections.Generic;
 // Pure visual-recognition rules with no Unity types, so they can be unit tested outside Unity (Editor/Tests/SightRulesTests.cs).
 
 /// <summary>Why the creature found a player. Recorded on the host at the kill and shown to the victim as one tip.</summary>
-public enum DetectionReason : byte { Unknown, SawEnterSpot, FootstepsLedHere, VisibleThroughOpening, FoundWhileInspecting, SeenInOpen }
+public enum DetectionReason : byte { Unknown, SawEnterSpot, FootstepsLedHere, VisibleThroughOpening, FoundWhileInspecting, SeenInOpen, TrackerLedHere }
 
 /// <summary>How attentive the creature is, derived from its behaviour and alertness (never from any player's awareness).</summary>
 public enum AttentionLevel : byte { Calm, Heightened, Searching, Inspecting }
@@ -79,6 +79,7 @@ public static class SightRules
     {
         DetectionReason.SawEnterSpot => "It saw you enter this hiding spot.",
         DetectionReason.FootstepsLedHere => "Your footsteps led it towards you.",
+        DetectionReason.TrackerLedHere => "Your motion tracker's beeping led it to you.",
         DetectionReason.VisibleThroughOpening => "You were visible through the opening.",
         DetectionReason.FoundWhileInspecting => "It found you while inspecting this spot.",
         DetectionReason.SeenInOpen => "It spotted you out in the open.",

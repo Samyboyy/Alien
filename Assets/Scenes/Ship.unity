@@ -7712,7 +7712,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9a2bd89737fee56479119294bfee0dfd, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::ShipAcousticZone
-  space: 2
+  space: 6
   priority: 1
   size: {x: 26, y: 4.5, z: 14}
 --- !u!1 &284637218
@@ -27688,6 +27688,14 @@ MonoBehaviour:
   emergeNearEvidence: 6
   emergeWaitMax: 5
   emergeGiveUp: 25
+  vocalsEnabled: 1
+  vocalMinGap: 12
+  chaseVocalCooldown: 20
+  searchVocalMin: 35
+  searchVocalMax: 70
+  roamCallMin: 70
+  roamCallMax: 140
+  roamCallMinAlertness: 0.25
 --- !u!195 &1026020763
 NavMeshAgent:
   m_ObjectHideFlags: 0
@@ -28014,7 +28022,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &1034680680
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -45409,7 +45417,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9a2bd89737fee56479119294bfee0dfd, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::ShipAcousticZone
-  space: 2
+  space: 6
   priority: 1
   size: {x: 26, y: 4.5, z: 14}
 --- !u!1 &1639513090

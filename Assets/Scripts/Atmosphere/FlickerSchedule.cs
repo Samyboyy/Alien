@@ -15,6 +15,8 @@ public sealed class FlickerSchedule
     bool inDip;
 
     public float Level { get; private set; } = 1f;
+    /// <summary>True on exactly the tick a new flicker burst begins (for a sound with its own cooldown, not one per dip).</summary>
+    public bool EventStarted { get; private set; }
 
     public FlickerSchedule(int seed, float minGap, float maxGap, float minLevel, float dipSeconds, int maxDips)
     {
@@ -30,6 +32,7 @@ public sealed class FlickerSchedule
     /// <summary>Advances time and returns the brightness multiplier, in [minLevel, 1].</summary>
     public float Tick(float dt, bool enabled)
     {
+        EventStarted = false;
         if (!enabled)
         {
             Level = 1f;
@@ -48,7 +51,7 @@ public sealed class FlickerSchedule
             }
             else
             {
-                if (dipsLeft == 0) dipsLeft = 1 + rng.Next(maxDips); // a new event
+                if (dipsLeft == 0) { dipsLeft = 1 + rng.Next(maxDips); EventStarted = true; } // a new event
                 dipsLeft--;
                 inDip = true;
                 dipLevel = minLevel + (0.85f - minLevel) * (float)rng.NextDouble();

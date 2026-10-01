@@ -1294,6 +1294,57 @@ MonoBehaviour:
   ventExitFallbackPitch: 0.8
   ventSoundFullDistance: 3
   ventSoundMaxDistance: 26
+  reflectionsEnabled: 1
+  maxReflectionEmitters: 12
+  reflectionNear: 4
+  reflectionFar: 20
+  reflectionFarWeight: 0.35
+  ownBodyReflectionWeight: 0.35
+  reflectionTransitionSeconds: 0.4
+  reflectionTailSeconds: 0.6
+  reflectionMaxRoom: -300
+  reflectionMaxEarly: 600
+  reflectionMaxOwnTail: -1000
+  ductHeight: 4.2
+  airTone: {fileID: 8300000, guid: 14341d988db195d45812e0e69d684809, type: 3}
+  machineryTone: {fileID: 0}
+  ductTone: {fileID: 0}
+  airToneVolume: 0.12
+  machineryToneVolume: 0.25
+  ductToneVolume: 0.2
+  atmosLoop: {x: 1.2, y: 73.200005}
+  airToneLoop: {x: 0.5, y: 58.7}
+  machineryToneLoop: {x: 0, y: 0}
+  ductToneLoop: {x: 0, y: 0}
+  roomToneLoopCrossfade: 2.5
+  roomToneTransition: 2.5
+  spectatorRoomTone: 0.7
+  flickerCrackle: {fileID: 8300000, guid: 6bdc5a24aa5b85e4e85ca4ace9faf946, type: 3}
+  flickerVolume: 0.5
+  flickerCooldown: 8
+  flickerPieceLength: 0.6
+  flickerMaxDistance: 12
+  roamCall: {fileID: 8300000, guid: 4736486da2594ef44a2938ac7226f6b2, type: 3}
+  roamCallSegments:
+  - {x: 14.2, y: 6}
+  - {x: 29.6, y: 6}
+  - {x: 45, y: 6}
+  - {x: 60.4, y: 6}
+  - {x: 106.700005, y: 6}
+  - {x: 122.1, y: 6}
+  - {x: 137.5, y: 6}
+  - {x: 152.90001, y: 6}
+  chaseSnarl: {fileID: 8300000, guid: c5d5392e5ebe9dd4886c68529dc87f18, type: 3}
+  roamCallVolume: 0.8
+  chaseSnarlVolume: 0.9
+  searchSnarlVolume: 0.55
+  roamCallMaxDistance: 45
+  roamCallFullDistance: 6
+  trackerBeep: {fileID: 0}
+  trackerOwnerVolume: 0.45
+  trackerRemoteVolume: 0.6
+  trackerRemoteFullDistance: 2
+  trackerRemoteMaxDistance: 18
   acousticProfiles:
   - space: 0
     room: -10000
@@ -1310,6 +1361,20 @@ MonoBehaviour:
     worldCutoffCap: 22000
     ambientLevel: 1
     transitionSeconds: 0.8
+    polishConfigured: 1
+    reflRoom: -10000
+    reflRoomHF: -10000
+    reflDecayTime: 0.1
+    reflDecayHFRatio: 0.5
+    reflEarly: -10000
+    reflEarlyDelay: 0
+    reflTail: -10000
+    reflTailDelay: 0
+    reflDiffusion: 100
+    reflDensity: 100
+    airToneLevel: 0
+    machineryToneLevel: 0
+    ductToneLevel: 0
   - space: 1
     room: -1200
     roomHF: -600
@@ -1325,6 +1390,20 @@ MonoBehaviour:
     worldCutoffCap: 22000
     ambientLevel: 0.85
     transitionSeconds: 0.7
+    polishConfigured: 1
+    reflRoom: -1100
+    reflRoomHF: -500
+    reflDecayTime: 0.32
+    reflDecayHFRatio: 0.6
+    reflEarly: -300
+    reflEarlyDelay: 0.004
+    reflTail: -2600
+    reflTailDelay: 0.006
+    reflDiffusion: 80
+    reflDensity: 85
+    airToneLevel: 0.7
+    machineryToneLevel: 0
+    ductToneLevel: 0
   - space: 2
     room: -1100
     roomHF: -500
@@ -1340,6 +1419,20 @@ MonoBehaviour:
     worldCutoffCap: 22000
     ambientLevel: 1.3
     transitionSeconds: 1
+    polishConfigured: 1
+    reflRoom: -800
+    reflRoomHF: -400
+    reflDecayTime: 0.6
+    reflDecayHFRatio: 0.6
+    reflEarly: 100
+    reflEarlyDelay: 0.01
+    reflTail: -1800
+    reflTailDelay: 0.014
+    reflDiffusion: 90
+    reflDensity: 100
+    airToneLevel: 0.4
+    machineryToneLevel: 1
+    ductToneLevel: 0
   - space: 3
     room: -1000
     roomHF: -400
@@ -1355,6 +1448,20 @@ MonoBehaviour:
     worldCutoffCap: 22000
     ambientLevel: 1
     transitionSeconds: 0.6
+    polishConfigured: 1
+    reflRoom: -900
+    reflRoomHF: -250
+    reflDecayTime: 0.4
+    reflDecayHFRatio: 0.7
+    reflEarly: 0
+    reflEarlyDelay: 0.006
+    reflTail: -2400
+    reflTailDelay: 0.008
+    reflDiffusion: 60
+    reflDensity: 70
+    airToneLevel: 1
+    machineryToneLevel: 0.15
+    ductToneLevel: 0
   - space: 4
     room: -1300
     roomHF: -700
@@ -1370,6 +1477,20 @@ MonoBehaviour:
     worldCutoffCap: 22000
     ambientLevel: 0.75
     transitionSeconds: 0.5
+    polishConfigured: 1
+    reflRoom: -1200
+    reflRoomHF: -600
+    reflDecayTime: 0.25
+    reflDecayHFRatio: 0.6
+    reflEarly: -400
+    reflEarlyDelay: 0.003
+    reflTail: -2800
+    reflTailDelay: 0.004
+    reflDiffusion: 85
+    reflDensity: 90
+    airToneLevel: 0.4
+    machineryToneLevel: 0
+    ductToneLevel: 0
   - space: 5
     room: -900
     roomHF: -1200
@@ -1385,6 +1506,78 @@ MonoBehaviour:
     worldCutoffCap: 3500
     ambientLevel: 0.6
     transitionSeconds: 0.4
+    polishConfigured: 1
+    reflRoom: -800
+    reflRoomHF: -1100
+    reflDecayTime: 0.2
+    reflDecayHFRatio: 0.5
+    reflEarly: 200
+    reflEarlyDelay: 0.002
+    reflTail: -3000
+    reflTailDelay: 0.003
+    reflDiffusion: 100
+    reflDensity: 100
+    airToneLevel: 0.2
+    machineryToneLevel: 0
+    ductToneLevel: 1
+  - space: 6
+    room: -1000
+    roomHF: -550
+    roomLF: 0
+    decayTime: 1.9
+    decayHFRatio: 0.65
+    reflections: -2000
+    reflectionsDelay: 0.02
+    reverb: -50
+    reverbDelay: 0.03
+    diffusion: 100
+    density: 100
+    worldCutoffCap: 22000
+    ambientLevel: 1.15
+    transitionSeconds: 1.1
+    polishConfigured: 1
+    reflRoom: -1300
+    reflRoomHF: -500
+    reflDecayTime: 0.5
+    reflDecayHFRatio: 0.6
+    reflEarly: -900
+    reflEarlyDelay: 0.018
+    reflTail: -2000
+    reflTailDelay: 0.025
+    reflDiffusion: 85
+    reflDensity: 90
+    airToneLevel: 0.8
+    machineryToneLevel: 0.35
+    ductToneLevel: 0
+  - space: 7
+    room: -900
+    roomHF: -900
+    roomLF: 0
+    decayTime: 0.35
+    decayHFRatio: 0.55
+    reflections: -700
+    reflectionsDelay: 0.002
+    reverb: -200
+    reverbDelay: 0.003
+    diffusion: 100
+    density: 100
+    worldCutoffCap: 6000
+    ambientLevel: 0.7
+    transitionSeconds: 0.5
+    polishConfigured: 1
+    reflRoom: -900
+    reflRoomHF: -700
+    reflDecayTime: 0.3
+    reflDecayHFRatio: 0.6
+    reflEarly: 0
+    reflEarlyDelay: 0.003
+    reflTail: -2600
+    reflTailDelay: 0.004
+    reflDiffusion: 70
+    reflDensity: 90
+    airToneLevel: 0
+    machineryToneLevel: 0
+    ductToneLevel: 1
   fallbackSpace: 3
   tuningVersion: 4
   engageLinger: 3

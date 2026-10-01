@@ -196,3 +196,21 @@ public sealed class BreathFader
         Gain = 0f;
     }
 }
+
+/// <summary>Timing of the vent cues for a player who joins in the middle of one.</summary>
+public static class VentCueRules
+{
+    /// <summary>
+    /// Where in a cue a late joiner should start: the seconds already elapsed since the phase began (scaled by the playback pitch), or -1
+    /// when the cue has (nearly) finished, so an expired warning is never replayed. <paramref name="minRemaining"/> is the shortest tail
+    /// still worth playing, in real seconds.
+    /// </summary>
+    public static float LateJoinOffset(float elapsedSeconds, float clipLength, float pitch, float minRemaining)
+    {
+        if (elapsedSeconds < 0f) elapsedSeconds = 0f;
+        float p = pitch <= 0.01f ? 1f : pitch;
+        float offset = elapsedSeconds * p;
+        float remainingRealSeconds = (clipLength - offset) / p;
+        return remainingRealSeconds >= minRemaining ? offset : -1f;
+    }
+}

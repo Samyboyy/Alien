@@ -121,6 +121,9 @@ public class NetworkFirstPersonController : NetworkBehaviour
 
     public bool IsCrouched => crouched.Value;
 
+    /// <summary>Owner only: the cursor is locked for gameplay (not in a menu).</summary>
+    public bool CursorCaptured => cursorCaptured;
+
     /// <summary>Sprint stamina 0..1. Only meaningful on the owning client (used by the cosmetic breathing audio).</summary>
     public float Stamina01 => stamina.Value;
 

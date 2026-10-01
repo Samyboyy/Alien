@@ -28,13 +28,21 @@ public class FootstepAudio : MonoBehaviour
         life = GetComponent<PlayerLife>();
         tuning = GetComponent<FootstepNoise>();
         if (bank == null) return;
-        if (own) pool = new SfxPool(gameObject, 3, AudioCategory.OwnBody, 0f, bank.footstepMaxDistance); // flat, a lighter share of the room reverb
+        if (own)
+        {
+            // Flat, with a light share of the room reverb and of the close metallic reflections; never occluded (they are your own feet).
+            pool = new SfxPool(gameObject, 3, AudioCategory.OwnBody, 0f, bank.footstepMaxDistance);
+            var acoustics = gameObject.AddComponent<EmitterAcoustics>(); // after the sources: the filters sit behind them
+            acoustics.occlude = false;
+            acoustics.reflectionWeight = bank.ownBodyReflectionWeight;
+            acoustics.Attach(pool);
+        }
         else
         {
             // Other players: positioned, perceptual rolloff, muffled by walls and closed doors.
             pool = new SfxPool(gameObject, 3, AudioCategory.Players, 1f, bank.footstepMaxDistance,
                 customRolloff: AudioRouting.Rolloff(bank.footstepFullDistance, bank.footstepMaxDistance));
-            var occlusion = gameObject.AddComponent<AudioOcclusion>(); // after the sources: the low-pass sits behind them
+            var occlusion = gameObject.AddComponent<EmitterAcoustics>(); // after the sources: the low-pass sits behind them
             occlusion.ignoreRoot = transform;
             occlusion.maxRange = bank.footstepMaxDistance + 2f;
             occlusion.Attach(pool);

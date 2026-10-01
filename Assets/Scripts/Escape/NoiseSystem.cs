@@ -3,7 +3,7 @@ using Unity.Netcode;
 using UnityEngine;
 
 /// <summary>What made a logical noise event. Only used by the creature's hearing and the debug display.</summary>
-public enum SoundKind : byte { Other, SprintStep, WalkStep, CrouchStep, Breathing, HeavyBreathing, Door, Impact }
+public enum SoundKind : byte { Other, SprintStep, WalkStep, CrouchStep, Breathing, HeavyBreathing, Door, Impact, Tracker }
 
 /// <summary>
 /// Host-only record of recent LOGICAL noise events for AI perception (nothing here is audible to players; there are no
@@ -27,9 +27,10 @@ public static class NoiseSystem
         public SoundKind kind;
         public ulong emitter; // owning client id of the player who made it, or NoEmitter
 
-        /// <summary>Footsteps and breathing of a player: a trail of that player. Doors, impacts and consoles are incidental.</summary>
+        /// <summary>Footsteps, breathing and motion-tracker beeps of a player: a trail of that player. Doors, impacts and consoles are incidental.</summary>
         public bool IsPlayerSound => emitter != NoEmitter && emitter != CreatureEmitter
-            && kind is SoundKind.SprintStep or SoundKind.WalkStep or SoundKind.CrouchStep or SoundKind.Breathing or SoundKind.HeavyBreathing;
+            && kind is SoundKind.SprintStep or SoundKind.WalkStep or SoundKind.CrouchStep or SoundKind.Breathing or SoundKind.HeavyBreathing
+                or SoundKind.Tracker;
     }
 
     const int MaxNoises = 64; // ponytail: fixed ring; old entries are dropped first. Raise if debug gizmos must show longer history.

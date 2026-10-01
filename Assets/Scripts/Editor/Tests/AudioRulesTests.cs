@@ -100,6 +100,26 @@ public class AudioRulesTests
     }
 
     [Test]
+    public void TensionOnlyWhenInTheSameRoomOrInSightAndItLingersWhenTheCreatureStepsOutOfView()
+    {
+        const float Linger = 3f, Dt = 0.1f;
+        // Nearby through a wall, in a different room and out of sight: not engaged, however close.
+        float r = AudioRules.EngageRemaining(false, 0f, Dt, Linger);
+        Assert.AreEqual(0f, r);
+        // Same room: engaged and refreshed every tick, even without a line of sight.
+        r = AudioRules.EngageRemaining(true, r, Dt, Linger);
+        Assert.AreEqual(Linger, r);
+        // The creature goes out of sight but stays in the room: still engaged (the room flag keeps refreshing it).
+        for (int i = 0; i < 50; i++) r = AudioRules.EngageRemaining(true, r, Dt, Linger);
+        Assert.Greater(r, 0f);
+        // It leaves the room and the player: engaged for the linger time, then it ends.
+        int ticks = 0;
+        while (r > 0f && ticks < 1000) { r = AudioRules.EngageRemaining(false, r, Dt, Linger); ticks++; }
+        Assert.AreEqual(30, ticks, 1, "about the linger time (3 s at 10 Hz)");
+        Assert.AreEqual(0f, r);
+    }
+
+    [Test]
     public void HeartbeatSpeedsUpAsTheCreatureGetsCloser()
     {
         Assert.AreEqual(1.4f, AudioRules.HeartbeatInterval(0f, 1.4f, 0.55f), 1e-5f);

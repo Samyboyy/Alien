@@ -92,6 +92,7 @@ public static partial class ShipBuilder
         RoundSetup.AddRoundManager();
         BuildFromMap();
         AddHidingAndRooms(); // survival additions: furniture, room volumes, search points (ShipSurvival.cs)
+        AddCreatureVentilation(); // room connections with their doors, and the creature vent network (ShipVentilation.cs)
         CreatureSetup.GetOrCreateSurface();
         EditorSceneManager.SaveScene(scene);
 
@@ -101,7 +102,7 @@ public static partial class ShipBuilder
         EditorSceneManager.MarkSceneDirty(scene);
         EditorSceneManager.SaveScene(scene);
 
-        CreatureSetup.Bake(Object.FindFirstObjectByType<NavMeshSurface>(), scene, ValidateSurvival);
+        CreatureSetup.Bake(Object.FindFirstObjectByType<NavMeshSurface>(), scene, ValidateWorld);
         Debug.Log("Ship scene built. Wait for 'NavMesh baked and Ship saved' before pressing Play.");
     }
 

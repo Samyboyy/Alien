@@ -57,18 +57,24 @@ public sealed class SearchMemory
 {
     readonly HashSet<int> points = new();
     readonly HashSet<int> rooms = new();
+    readonly HashSet<int> failedLinks = new();
 
     public ICollection<int> Rooms => rooms;
+    /// <summary>Room connections that could not be used during this search (door refused, blocked, timed out).</summary>
+    public ICollection<int> FailedLinks => failedLinks;
     public int PointCount => points.Count;
 
     public bool PointChecked(int id) => points.Contains(id);
     public void MarkPoint(int id) => points.Add(id);
     public bool RoomSearched(int id) => rooms.Contains(id);
     public void MarkRoom(int id) => rooms.Add(id);
+    public void MarkLinkFailed(int id) => failedLinks.Add(id);
+    public bool LinkFailed(int id) => failedLinks.Contains(id);
 
     public void Clear()
     {
         points.Clear();
         rooms.Clear();
+        failedLinks.Clear();
     }
 }

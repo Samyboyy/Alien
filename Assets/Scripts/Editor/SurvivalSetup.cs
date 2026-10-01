@@ -48,11 +48,11 @@ public static class SurvivalSetup
         if (added > 0)
         {
             Debug.Log("Rebaking navigation for the new furniture. Wait for 'NavMesh baked and Ship saved' and the validation summary.");
-            CreatureSetup.Bake(surface, scene, ShipBuilder.ValidateSurvival);
+            CreatureSetup.Bake(surface, scene, ShipBuilder.ValidateWorld);
         }
         else
         {
-            ShipBuilder.ValidateSurvival();
+            ShipBuilder.ValidateWorld();
             EditorSceneManager.SaveScene(scene);
         }
     }

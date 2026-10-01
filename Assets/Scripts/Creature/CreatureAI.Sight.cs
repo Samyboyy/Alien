@@ -83,7 +83,7 @@ public partial class CreatureAI
     // Derived only from what the creature is doing and its general alertness, so it applies to every player alike.
     // Search/pursuit states stay "searching" after sight is lost; an unalerted patrol is the only calm state.
     AttentionLevel AttentionNow(bool inspecting) => SightRules.AttentionFor(inspecting,
-        state.Value is CreatureState.Search or CreatureState.Pursue or CreatureState.Chase or CreatureState.Bash,
+        state.Value is CreatureState.Search or CreatureState.Pursue or CreatureState.Chase or CreatureState.Bash or CreatureState.Vent,
         state.Value == CreatureState.Investigate, alertness, heightenedAlertness);
 
     float AttentionSeconds(AttentionLevel a) => a switch

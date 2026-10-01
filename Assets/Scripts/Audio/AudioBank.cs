@@ -63,6 +63,9 @@ public class AudioBank : ScriptableObject
     [Header("Bookkeeping")]
     [Tooltip("Setup Audio applies one-off tuning changes for each new version, once, and logs them")] public int tuningVersion;
 
+    [Header("When the tension sounds play")]
+    [Tooltip("Only while the creature is in the same room as you or can see you. It keeps counting as engaged this long after that stops, so a creature that steps out of view in your room does not cut the music.")] public float engageLinger = 3f;
+
     [Header("Heartbeat (subtle, faster the nearer the creature is)")]
     [Tooltip("Full rate at or inside this distance (m)")] public float heartbeatNear = 3f;
     [Tooltip("No heartbeat beyond this distance (m)")] public float heartbeatFar = 11f;

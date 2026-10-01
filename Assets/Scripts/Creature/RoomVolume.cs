@@ -21,6 +21,13 @@ public class RoomVolume : MonoBehaviour
 
     public bool Contains(Vector3 p) => DistanceTo(p) <= 0f;
 
+    /// <summary>The room volume a point is inside, or null (corridors have none).</summary>
+    public static RoomVolume At(Vector3 p)
+    {
+        foreach (var r in All) if (r.Contains(p)) return r;
+        return null;
+    }
+
     /// <summary>Horizontal distance from the point to the rectangle (0 when inside).</summary>
     public float DistanceTo(Vector3 p)
     {

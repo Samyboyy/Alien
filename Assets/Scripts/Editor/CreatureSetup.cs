@@ -72,6 +72,9 @@ public static class CreatureSetup
         "inspectEyeHeight", "pointTimeout", "alertPatrolSpeedBonus",
         "recogniseSeconds", "farRecogniseFactor", "peripheralFactor", "awarenessHold", "awarenessDecaySeconds", "watchThreshold",
         "inspectReach", "inspectOpeningTolerance",
+        "ventEntryMaxMetres", "ventFrustrationGrace", "ventFrustrationSeconds", "ventFrustrationBonus", "ventFrustratedMinGround",
+        "ventSpeed", "ventMinAdvantage", "ventMaxTimeFraction", "ventMinGroundMetres", "ventPatrolBias",
+        "huntPlanChance", "huntPlanCooldown", "huntStaleSeconds", "huntHeatHalfLife", "huntStaleWeight", "huntHeatWeight", "huntDistanceWeight",
         "concealedCalmSeconds", "concealedHeightenedSeconds", "concealedSearchSeconds", "concealedInspectSeconds", "referenceCover", "heightenedAlertness",
     };
 

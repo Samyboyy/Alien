@@ -54,7 +54,9 @@ public class CreatureAudio : MonoBehaviour
         if (active && !wasActive) nextSnarl = Time.timeAsDouble + bank.snarlFirstDelay;
         wasActive = active;
 
-        Step(delta); // footsteps follow the movement itself, whatever the round state
+        // Footsteps follow the movement itself, whatever the round state, but not while it is inside a vent (it is not walking there).
+        if (ai.CurrentVentPhase == VentPhase.None || ai.CurrentVentPhase == VentPhase.Approaching) Step(delta);
+        else { stride = speed = 0f; }
 
         if ((checkTimer -= Time.deltaTime) <= 0f)
         {
@@ -96,6 +98,19 @@ public class CreatureAudio : MonoBehaviour
         stepsPlayed++;
         lastStepTime = Time.timeAsDouble;
         if (stepsPlayed == 1) Debug.Log($"CreatureAudio: first footstep (clip {i}, volume {volume:0.00}, speed {speed:0.0} m/s).");
+    }
+
+    // ---------- Vent hooks (cosmetic, on every peer) ----------
+    // Called when the replicated vent phase changes. There are no suitable vent sounds yet, so these are deliberately silent:
+    // add a clip to the AudioBank and play it here. They are separate from the AI's logical hearing: the creature's own sounds are
+    // ignored by its hearing, and nothing here emits a NoiseSystem event.
+    //   Entering    -> the creature squeezes into the vent (entry sound / scrape)
+    //   Travelling  -> movement and rattling in the duct (loop, ideally 3D from the creature's real position)
+    //   Preparing   -> the pre-emergence warning the players can hear
+    //   Exiting     -> the grate and the creature coming out
+    public void OnVentPhase(VentPhase previous, VentPhase now)
+    {
+        // Intentionally empty: see above.
     }
 
     // F3 (the creature's debug label toggle) shows what this component is doing, so a silent creature can be diagnosed by eye.

@@ -21,7 +21,7 @@ public class LocalAmbience : MonoBehaviour
     TensionRiser riser;
     CreatureAI creature;
     readonly BreathFader breath = new();
-    float riserTarget, riserLevel, heartTarget, heartLevel, sampleTimer, findTimer, beatTimer;
+    float riserTarget, riserLevel, heartTarget, heartLevel, sampleTimer, findTimer, beatTimer, engaged;
     bool lowStamina, lowRaw, scared;
     double runReadyAt;
 
@@ -123,7 +123,7 @@ public class LocalAmbience : MonoBehaviour
     void Sample(bool on)
     {
         riserTarget = heartTarget = 0f;
-        if (!on) return;
+        if (!on) { engaged = 0f; return; }
         if (creature == null)
         {
             if ((findTimer -= 0.1f) > 0f) return;
@@ -132,11 +132,20 @@ public class LocalAmbience : MonoBehaviour
             if (creature == null) return;
         }
         Vector3 ear = transform.position + Vector3.up * 1.5f, body = creature.transform.position + Vector3.up;
-        bool blocked = Physics.Linecast(body, ear, out var hit, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore)
-            && !hit.transform.IsChildOf(transform);
         float d = Vector3.Distance(body, ear);
-        riserTarget = AudioRules.Proximity(d, bank.riserNear, bank.riserFar, blocked, bank.riserWallFactor);
-        heartTarget = AudioRules.Proximity(d, bank.heartbeatNear, bank.heartbeatFar, blocked, bank.riserWallFactor);
+
+        // The tension plays only when the creature is in the same room as the player, or can see the player. Being merely close
+        // through a wall does not count. The linger keeps it going when a creature in your room steps out of view.
+        var creatureRoom = RoomVolume.At(creature.transform.position);
+        bool sameRoom = creatureRoom != null && creatureRoom == RoomVolume.At(transform.position);
+        Vector3 creatureEye = creature.transform.position + Vector3.up * creature.eyeHeight;
+        bool inSight = d <= creature.sightDistance
+            && (!Physics.Linecast(creatureEye, ear, out var hit, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore) || hit.transform.IsChildOf(transform));
+        engaged = AudioRules.EngageRemaining(sameRoom || inSight, engaged, 0.1f, bank.engageLinger);
+        if (engaged <= 0f) return;
+
+        riserTarget = AudioRules.Proximity(d, bank.riserNear, bank.riserFar, false, 1f);
+        heartTarget = AudioRules.Proximity(d, bank.heartbeatNear, bank.heartbeatFar, false, 1f);
     }
 
     // One beat at a time, scheduled. The interval shrinks as the creature closes in.

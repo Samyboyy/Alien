@@ -88,6 +88,14 @@ public static class AudioRules
         outgoing = (float)System.Math.Cos(t);
     }
 
+    /// <summary>
+    /// How long the creature still counts as "engaged" with the listener: refreshed to <paramref name="linger"/> while they share a room or
+    /// can see each other, and counting down otherwise. A hiding player is therefore not let off the moment the creature steps out of
+    /// view in the same room, and a doorway flicker does not cut the music.
+    /// </summary>
+    public static float EngageRemaining(bool sameRoomOrInSight, float remaining, float dt, float linger) =>
+        sameRoomOrInSight ? linger : System.Math.Max(0f, remaining - dt);
+
     /// <summary>Seconds between heartbeats: slow when the creature is barely near, fast when it is on top of you.</summary>
     public static float HeartbeatInterval(float level, float slowSeconds, float fastSeconds) =>
         slowSeconds + (fastSeconds - slowSeconds) * Clamp01(level);

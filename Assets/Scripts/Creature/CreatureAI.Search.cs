@@ -30,7 +30,7 @@ public partial class CreatureAI
     [Tooltip("Give up on one search point after this long (blocked / unreachable)")] public float pointTimeout = 12f;
     [Tooltip("Patrol speed gain at full alertness; waits also shorten")] public float alertPatrolSpeedBonus = 0.4f;
 
-    enum SearchStep : byte { Travel, Inspect }
+    enum SearchStep : byte { Travel, Inspect, Transit }
 
     readonly SearchMemory memory = new();
     NavMeshPath searchPath; // created in Awake
@@ -92,6 +92,7 @@ public partial class CreatureAI
         inspectingLow = false;
         pointsChecked = hidingChecked = roomsVisited = 0;
         phaseTime = 0f;
+        ClearTransit();
         if (!fullHistory) return;
         memory.Clear();
         witnessedSpot = null;
@@ -128,6 +129,7 @@ public partial class CreatureAI
     void EnterRoom(RoomVolume room)
     {
         currentRoom = room;
+        NoteRoomVisit(room);
         pointsChecked = hidingChecked = 0;
         if (room != null) memory.MarkRoom(room.GetInstanceID());
     }
@@ -151,6 +153,7 @@ public partial class CreatureAI
         if (searchPhase == SearchPhase.Done) return;
 
         if (step == SearchStep.Inspect) { UpdateInspect(); return; }
+        if (step == SearchStep.Transit) { UpdateTransit(); return; }
 
         travelTimer += Time.deltaTime;
         if (agent.pathPending) return;
@@ -308,6 +311,7 @@ public partial class CreatureAI
     void NextNearbyRoom()
     {
         if (roomsVisited >= nearbyRooms) { FinishSearch("searched the nearby rooms"); return; }
+        if (TryLinkedNextRoom()) return; // explicit connections: go through the right door
 
         var all = RoomVolume.All;
         var from = currentRoom ?? NearestRoom(searchCenter, 25f);

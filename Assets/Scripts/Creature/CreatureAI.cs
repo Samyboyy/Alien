@@ -162,6 +162,7 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
     {
         state.OnValueChanged -= OnStateChanged;
         ventPhase.OnValueChanged -= OnVentPhaseChanged;
+        GetComponent<CreatureAudio>()?.StopVentAudio(); // no orphaned duct loop after a despawn or host shutdown
         agent.enabled = false;
     }
 
@@ -214,8 +215,9 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
                 if (tick) Hear(); // may move the remembered destination; the door attempt carries on
                 UpdateBash();
                 break;
-            default: // Patrol, Search, Investigate, Pursue: sight first, then hearing
+            default: // Patrol, Search, Investigate, Pursue: sight first, then hearing, then (when it wants one) a vent
                 if (tick && (Acquire() || Hear())) return;
+                if (TickVentDesire()) return;
                 if (state.Value == CreatureState.Patrol) UpdatePatrol();
                 else UpdateSearch();
                 break;
@@ -327,7 +329,7 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
 
     // Handles every new sound event once. Among those that pass the evidence rule, the pursued player's trail wins,
     // otherwise the strongest. Returns true when it took over the creature's behaviour this tick.
-    bool Hear(bool evidenceOnly = false)
+    bool Hear(HearMode mode = HearMode.Act)
     {
         double now = Time.timeAsDouble;
         bool trail = evidenceKind != EvidenceKind.None && evidenceEmitter != NoiseSystem.NoEmitter;
@@ -373,11 +375,15 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
         lastSound = pick;
         lastSoundStrength = pickStrength;
         lastSoundTime = now;
-        if (!pickPursued) lastSwitchTime = now;
         alertness = Mathf.Max(alertness, 0.5f + 0.5f * pickStrength); // heard something: more alert, never told where anyone is
+        if (mode == HearMode.Pending)
+        {
+            // Inside a duct: the best sound is held until the next junction, where a turn is possible (CreatureAI.Vent.cs).
+            OfferPendingSound(pos, pickStrength, pick.IsPlayerSound ? pick.emitter : NoiseSystem.NoEmitter, pickPursued, now);
+            return true;
+        }
+        if (!pickPursued) lastSwitchTime = now;
         SetEvidence(EvidenceKind.Noise, pos, pickStrength, pick.IsPlayerSound ? pick.emitter : NoiseSystem.NoEmitter);
-
-        if (evidenceOnly) return true; // inside the duct: the evidence is updated, nothing else changes
 
         if (state.Value == CreatureState.Bash)
         {
@@ -476,9 +482,10 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
         lastSound = default;
         lastSoundStrength = 0f;
         lastSwitchTime = lastTrailTime = double.NegativeInfinity;
-        aiRng = new System.Random(rng.Next()); // this round's choices follow the round seed
+        int roundSeed = rng.Next(); // this round's choices follow the round seed
+        aiRng = new System.Random(roundSeed);
         ResetHunting();
-        ResetVent(startPos); // cancels any trip, restores collider, body and agent, clears cooldown and history
+        ResetVent(startPos, roundSeed ^ 0x5EED); // cancels any trip, restores collider, body and agent, clears cadence, history and held sounds
         sights.Clear(); // every player's awareness and detection history
         lastSightTime = Time.timeAsDouble;
         chaseInspectSpot = null;

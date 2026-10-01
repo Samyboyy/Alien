@@ -227,23 +227,30 @@ public partial class CreatureAI
         nextExploreAt = Time.timeAsDouble + huntPlanCooldown * 0.5;
     }
 
-    // Called when patrol has finished waiting at a point. Even with no evidence the creature is hunting: it picks the room it has not
-    // looked in for longest (and where players were last seen or heard), preferring the nearer. It then goes there through that
-    // room's doors (opening them as needed), or by vent when that is clearly quicker, and searches it.
-    bool TryHunt()
+    // A point in a room to aim for: its first search point (on the NavMesh by construction), else its centre.
+    static Vector3 RoomAim(RoomVolume room) =>
+        room.searchPoints.Length > 0 && room.searchPoints[0] != null ? room.searchPoints[0].position : room.transform.position;
+
+    // The room a hunting creature should look in next: not visited for longest, where players were recently seen or heard, nearer
+    // first; or FARTHER first when it wants to switch tactics (frustrated, or wanting a vent). Ship layout and its own experience only.
+    bool PickHuntRoom(bool preferFar, out RoomVolume room, out List<int> path, out List<RoomLink> sources)
     {
+        room = null;
+        path = null;
+        sources = null;
+        if (RoomLink.All.Count == 0) return false;
         double now = Time.timeAsDouble;
-        if (now < nextExploreAt || RoomLink.All.Count == 0 || aiRng.NextDouble() >= huntPlanChance) return false;
         var all = RoomVolume.All;
         var here = RoomAt(transform.position) ?? NearestRoom(transform.position, 40f);
         int start = all.IndexOf(here);
         if (start < 0) return false;
         NoteRoomVisit(here);
 
-        var links = BuildLinkList(out var sources);
+        var links = BuildLinkList(out sources);
         var scores = new float[all.Count];
         var eligible = new bool[all.Count];
         var paths = new List<int>[all.Count];
+        float distanceWeight = preferFar ? -huntDistanceWeight : huntDistanceWeight * (1f - Frustration());
         for (int i = 0; i < all.Count; i++)
         {
             if (i == start) continue;
@@ -251,22 +258,35 @@ public partial class CreatureAI
             if (paths[i] == null || paths[i].Count == 0) continue;
             float since = recentRooms.TryGetValue(all[i].GetInstanceID(), out double seen) ? (float)(now - seen) : huntStaleSeconds;
             float metres = Vector3.Distance(transform.position, all[i].transform.position);
-            scores[i] = HuntRules.Score(since, HeatOf(all[i], now), metres, huntStaleSeconds, 3f, 120f, huntStaleWeight, huntHeatWeight, huntDistanceWeight * (1f - Frustration())); // frustrated: far rooms are fine
+            scores[i] = HuntRules.Score(since, HeatOf(all[i], now), metres, huntStaleSeconds, 3f, 120f, huntStaleWeight, huntHeatWeight, distanceWeight);
             eligible[i] = true;
         }
         int best = HuntRules.Pick(scores, eligible);
         if (best < 0) return false;
+        room = all[best];
+        path = paths[best];
+        return true;
+    }
+
+    // Called when patrol has finished waiting at a point. Even with no evidence the creature is hunting: it picks a room to search
+    // (PickHuntRoom) and goes there through that room's doors (opening them as needed), or by vent when that is clearly quicker or it
+    // wants a vent anyway, and searches it.
+    bool TryHunt()
+    {
+        double now = Time.timeAsDouble;
+        if (now < nextExploreAt || RoomLink.All.Count == 0 || aiRng.NextDouble() >= huntPlanChance) return false;
+        bool wantsVent = VentDesire() >= 1f;
+        if (!PickHuntRoom(wantsVent, out var room, out var path, out var sources)) return false;
+        var here = RoomAt(transform.position) ?? NearestRoom(transform.position, 40f);
 
         nextExploreAt = now + huntPlanCooldown;
-        var room = all[best];
         string why = $"hunting: {room.roomName} (not visited for {(recentRooms.TryGetValue(room.GetInstanceID(), out double s) ? now - s : huntStaleSeconds):0}s, heat {HeatOf(room, now):0.0})";
 
-        // A long way off and clearly quicker by vent? Then vent; it will search the room it comes out in.
-        Vector3 aim = room.searchPoints.Length > 0 && room.searchPoints[0] != null ? room.searchPoints[0].position : room.transform.position; // on the NavMesh
-        if (ConsiderVent(why, CreatureState.Patrol, aim, "room staleness and heat, no player position")) return true;
+        // A long way off and clearly quicker by vent (or it wants a vent anyway)? Then vent; it will search the room it comes out in.
+        if (ConsiderVent(why, CreatureState.Patrol, RoomAim(room), "room staleness and heat, no player position")) return true;
 
         var route = new List<RoomLink>();
-        foreach (int id in paths[best]) route.Add(sources.Find(l => l.id == id));
+        foreach (int id in path) route.Add(sources.Find(l => l.id == id));
         BeginHunt(route, here, room, why);
         return true;
     }

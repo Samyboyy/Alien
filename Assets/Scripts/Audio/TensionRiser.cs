@@ -35,6 +35,7 @@ public sealed class TensionRiser
             s.playOnAwake = false;
             s.spatialBlend = 0f; // in your head, not in the world
             s.volume = 0f;
+            AudioRouting.Configure(s, AudioCategory.Internal); // dry: never in the room reverb
             voice[i] = s;
         }
     }
@@ -100,7 +101,7 @@ public sealed class TensionRiser
 
     void ApplyVolumes()
     {
-        float v = bank.riserVolume * master;
+        float v = bank.riserVolume * master * AudioRouting.Volume(AudioCategory.Internal);
         if (xf < 1f)
         {
             xf = Mathf.Min(1f, xf + Time.deltaTime / Mathf.Max(0.05f, bank.riserCrossfade));

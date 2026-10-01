@@ -3,7 +3,8 @@ using UnityEngine;
 /// <summary>
 /// Audible footsteps of a player, on every peer (added at runtime by NetworkFirstPersonController when an AudioBank exists).
 /// It works from the player's own replicated movement, like FootstepNoise, but only makes sound: it never emits noise events, so
-/// what the creature can hear is unchanged. Your own steps are flat and quieter, other players' are 3D.
+/// what the creature can hear is unchanged. Your own steps are flat and quieter (and only lightly in the room reverb), other players'
+/// are 3D with the perceptual rolloff and occlusion of other world sounds.
 /// Crouching uses the quiet clip; walking and sprinting use the regular clips (the second one now and then), sprinting a little
 /// higher and louder. Pitch and volume vary slightly so steps do not sound identical.
 /// </summary>
@@ -26,7 +27,18 @@ public class FootstepAudio : MonoBehaviour
         controller = GetComponent<NetworkFirstPersonController>();
         life = GetComponent<PlayerLife>();
         tuning = GetComponent<FootstepNoise>();
-        pool = new SfxPool(gameObject, 3, own ? 0f : 1f, bank != null ? bank.footstepMaxDistance : 22f);
+        if (bank == null) return;
+        if (own) pool = new SfxPool(gameObject, 3, AudioCategory.OwnBody, 0f, bank.footstepMaxDistance); // flat, a lighter share of the room reverb
+        else
+        {
+            // Other players: positioned, perceptual rolloff, muffled by walls and closed doors.
+            pool = new SfxPool(gameObject, 3, AudioCategory.Players, 1f, bank.footstepMaxDistance,
+                customRolloff: AudioRouting.Rolloff(bank.footstepFullDistance, bank.footstepMaxDistance));
+            var occlusion = gameObject.AddComponent<AudioOcclusion>(); // after the sources: the low-pass sits behind them
+            occlusion.ignoreRoot = transform;
+            occlusion.maxRange = bank.footstepMaxDistance + 2f;
+            occlusion.Attach(pool);
+        }
         rng = new System.Random(GetInstanceID());
         last = transform.position;
     }

@@ -1239,23 +1239,37 @@ MonoBehaviour:
   - 0.0897144
   - 0.049702164
   riserEnvelopeStep: 0.1
+  masterVolume: 1
+  worldVolume: 1
+  creatureVolume: 1
+  playersVolume: 1
+  ambienceVolume: 1
+  internalVolume: 1
+  uiVolume: 1
+  ownBodyReverbMix: 0.5
   atmosVolume: 0.1
   riserVolume: 0.5
   ownFootstepVolume: 0.5
   otherFootstepVolume: 0.9
-  monsterFootstepVolume: 1
+  monsterFootstepVolume: 0.9
   snarlVolume: 0.85
   heartbeatVolume: 0.35
-  scaredBreathVolume: 0.3
-  runBreathVolume: 0.35
+  scaredBreathVolume: 0.15
+  runBreathVolume: 0.18
   doorVolume: 0.8
   regular2Chance: 0.3
   pitchSpread: 0.05
   monsterStride: 1.5
   footstepMaxDistance: 22
-  monsterStepFullDistance: 6
-  monsterStepMaxDistance: 34
-  monsterStepSpatial: 0.85
+  footstepFullDistance: 2
+  monsterStepFullDistance: 3.5
+  monsterStepMaxDistance: 22
+  monsterStepSpatial: 1
+  occlusionHz: 8
+  occlusionPerObstacle: 0.7
+  occludedCutoff: 700
+  occludedGain: 0.4
+  occlusionSmoothSeconds: 0.25
   riserNear: 3
   riserFar: 22
   riserWallFactor: 0.6
@@ -1266,7 +1280,114 @@ MonoBehaviour:
   riserCrossfade: 1.5
   doorFullDistance: 4
   doorMaxDistance: 28
-  tuningVersion: 2
+  ventEnter: {fileID: 0}
+  ventTravel: {fileID: 0}
+  ventWarning: {fileID: 0}
+  ventExit: {fileID: 0}
+  ventEnterVolume: 0.8
+  ventTravelVolume: 0.35
+  ventWarningVolume: 1
+  ventExitVolume: 0.9
+  ventFallbackLength: 1.1
+  ventEnterFallbackPitch: 0.7
+  ventWarningFallbackPitch: 0.55
+  ventExitFallbackPitch: 0.8
+  ventSoundFullDistance: 3
+  ventSoundMaxDistance: 26
+  acousticProfiles:
+  - space: 0
+    room: -10000
+    roomHF: -10000
+    roomLF: 0
+    decayTime: 0.5
+    decayHFRatio: 0.8
+    reflections: -10000
+    reflectionsDelay: 0.005
+    reverb: -10000
+    reverbDelay: 0.01
+    diffusion: 100
+    density: 100
+    worldCutoffCap: 22000
+    ambientLevel: 1
+    transitionSeconds: 0.8
+  - space: 1
+    room: -1200
+    roomHF: -600
+    roomLF: 0
+    decayTime: 0.55
+    decayHFRatio: 0.75
+    reflections: -1400
+    reflectionsDelay: 0.004
+    reverb: -250
+    reverbDelay: 0.006
+    diffusion: 100
+    density: 100
+    worldCutoffCap: 22000
+    ambientLevel: 0.85
+    transitionSeconds: 0.7
+  - space: 2
+    room: -1100
+    roomHF: -500
+    roomLF: 0
+    decayTime: 1.4
+    decayHFRatio: 0.7
+    reflections: -1600
+    reflectionsDelay: 0.012
+    reverb: -150
+    reverbDelay: 0.02
+    diffusion: 100
+    density: 100
+    worldCutoffCap: 22000
+    ambientLevel: 1.3
+    transitionSeconds: 1
+  - space: 3
+    room: -1000
+    roomHF: -400
+    roomLF: 0
+    decayTime: 0.85
+    decayHFRatio: 0.65
+    reflections: -1000
+    reflectionsDelay: 0.006
+    reverb: -350
+    reverbDelay: 0.01
+    diffusion: 60
+    density: 100
+    worldCutoffCap: 22000
+    ambientLevel: 1
+    transitionSeconds: 0.6
+  - space: 4
+    room: -1300
+    roomHF: -700
+    roomLF: 0
+    decayTime: 0.45
+    decayHFRatio: 0.8
+    reflections: -1500
+    reflectionsDelay: 0.003
+    reverb: -450
+    reverbDelay: 0.004
+    diffusion: 100
+    density: 100
+    worldCutoffCap: 22000
+    ambientLevel: 0.75
+    transitionSeconds: 0.5
+  - space: 5
+    room: -900
+    roomHF: -1200
+    roomLF: 0
+    decayTime: 0.3
+    decayHFRatio: 0.5
+    reflections: -600
+    reflectionsDelay: 0.001
+    reverb: -100
+    reverbDelay: 0.002
+    diffusion: 100
+    density: 100
+    worldCutoffCap: 3500
+    ambientLevel: 0.6
+    transitionSeconds: 0.4
+  fallbackSpace: 3
+  tuningVersion: 4
+  engageLinger: 3
   heartbeatNear: 3
   heartbeatFar: 11
   heartbeatThreshold: 0.05
@@ -1275,8 +1396,9 @@ MonoBehaviour:
   heartbeatBeatLength: 0.95
   scaredOn: 0.5
   scaredOff: 0.3
-  runBreathOnStamina: 0.35
-  runBreathOffStamina: 0.7
+  runBreathOnStamina: 0.2
+  runBreathOffStamina: 0.5
+  runBreathCooldown: 25
   breathFadeIn: 0.9
   breathFadeOut: 0.4
   snarlSpatial: 0.3

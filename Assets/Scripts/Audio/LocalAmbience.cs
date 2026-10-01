@@ -32,22 +32,25 @@ public class LocalAmbience : MonoBehaviour
         life = GetComponent<PlayerLife>();
         if (bank == null) { enabled = false; return; }
 
-        atmos = MakeSource("Atmos", bank.atmos, true);
-        atmos.volume = bank.atmosVolume;
+        atmos = MakeSource("Atmos", bank.atmos, true, AudioCategory.Ambience);
+        atmos.volume = bank.atmosVolume * AudioRouting.Volume(AudioCategory.Ambience);
         if (atmos.clip != null) atmos.Play();
 
         if (bank.tensionRiser != null) riser = new TensionRiser(bank, gameObject);
 
-        heartSource = MakeSource("Heartbeat", null, false);
-        beat = MakeBeat(bank.heartbeat, bank.heartbeatBeatStart, bank.heartbeatBeatLength);
+        heartSource = MakeSource("Heartbeat", null, false, AudioCategory.Internal);
+        beat = AudioClipTools.Slice(bank.heartbeat, bank.heartbeatBeatStart, bank.heartbeatBeatLength, 0.15f, "heartbeat beat");
         if (bank.heartbeat != null && beat == null) Debug.LogWarning("Heartbeat: could not cut a beat from the clip (is it set to Decompress On Load? run Alien > Setup Audio).");
 
-        scaredSource = MakeSource("Scared Breathing", bank.scaredBreath, true);
-        runSource = MakeSource("Run Breathing", bank.runBreath, true);
+        scaredSource = MakeSource("Scared Breathing", bank.scaredBreath, true, AudioCategory.Internal);
+        runSource = MakeSource("Run Breathing", bank.runBreath, true, AudioCategory.Internal);
+
+        // The ship's room acoustics for this listener (reverb, the crawlspace's muffling, ambience level per space).
+        if (GetComponent<ShipAcoustics>() == null) gameObject.AddComponent<ShipAcoustics>().Begin();
     }
 
-    // Flat (2D), not tied to any position.
-    AudioSource MakeSource(string name, AudioClip clip, bool loop)
+    // Flat (2D), not tied to any position, and dry (Ambience/Internal bypass the room reverb).
+    AudioSource MakeSource(string name, AudioClip clip, bool loop, AudioCategory category)
     {
         var go = new GameObject(name);
         go.transform.SetParent(transform, false);
@@ -56,28 +59,8 @@ public class LocalAmbience : MonoBehaviour
         s.loop = loop;
         s.playOnAwake = false;
         s.spatialBlend = 0f;
+        AudioRouting.Configure(s, category);
         return s;
-    }
-
-    // One lub-dub cut out of the long heartbeat clip, with short fades at both ends so it never clicks.
-    static AudioClip MakeBeat(AudioClip src, float start, float length)
-    {
-        if (src == null) return null;
-        int ch = src.channels, freq = src.frequency;
-        int first = Mathf.Clamp((int)(start * freq), 0, src.samples - 1);
-        int frames = Mathf.Min((int)(length * freq), src.samples - first);
-        if (frames <= 0) return null;
-        var data = new float[frames * ch];
-        if (!src.GetData(data, first)) return null;
-        int fadeIn = Mathf.Min(frames, freq / 200), fadeOut = Mathf.Min(frames, (int)(freq * 0.15f));
-        for (int f = 0; f < frames; f++)
-        {
-            float g = Mathf.Min(f < fadeIn ? (f + 1f) / fadeIn : 1f, frames - f <= fadeOut ? (frames - f) / (float)fadeOut : 1f);
-            for (int c = 0; c < ch; c++) data[f * ch + c] *= g;
-        }
-        var clip = AudioClip.Create("heartbeat beat", frames, ch, freq, false);
-        clip.SetData(data, 0);
-        return clip;
     }
 
     void OnDestroy()
@@ -94,7 +77,7 @@ public class LocalAmbience : MonoBehaviour
     {
         if (bank == null) return;
         float dt = Time.deltaTime;
-        atmos.volume = bank.atmosVolume; // live tuning
+        atmos.volume = bank.atmosVolume * ShipAcoustics.AmbientLevel * AudioRouting.Volume(AudioCategory.Ambience); // live tuning, louder in the machinery rooms
         bool on = RoundManager.IsActive && (life == null || life.IsAlive);
 
         if ((sampleTimer -= dt) <= 0f)
@@ -154,7 +137,7 @@ public class LocalAmbience : MonoBehaviour
         if (beat == null || !on || heartLevel < bank.heartbeatThreshold) { beatTimer = 0f; return; }
         if ((beatTimer -= dt) > 0f) return;
         beatTimer = AudioRules.HeartbeatInterval(heartLevel, bank.heartbeatSlowInterval, bank.heartbeatFastInterval);
-        heartSource.PlayOneShot(beat, Mathf.Clamp01(bank.heartbeatVolume * Mathf.Lerp(0.45f, 1f, heartLevel)));
+        heartSource.PlayOneShot(beat, Mathf.Clamp01(bank.heartbeatVolume * Mathf.Lerp(0.45f, 1f, heartLevel) * AudioRouting.Volume(AudioCategory.Internal)));
     }
 
     // Out of breath beats scared; never both. BreathFader guarantees one voice at a time.
@@ -169,8 +152,9 @@ public class LocalAmbience : MonoBehaviour
         var desired = on ? AudioRules.DesiredBreath(lowStamina, scared) : BreathKind.None;
         breath.Tick(desired, dt, bank.breathFadeIn, bank.breathFadeOut);
 
-        Drive(scaredSource, breath.Current == BreathKind.Scared, breath.Gain * bank.scaredBreathVolume);
-        Drive(runSource, breath.Current == BreathKind.Run, breath.Gain * bank.runBreathVolume);
+        float inner = AudioRouting.Volume(AudioCategory.Internal);
+        Drive(scaredSource, breath.Current == BreathKind.Scared, breath.Gain * bank.scaredBreathVolume * inner);
+        Drive(runSource, breath.Current == BreathKind.Run, breath.Gain * bank.runBreathVolume * inner);
     }
 
     // A breathing voice plays only while it is THE current one; otherwise it is stopped.

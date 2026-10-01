@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
 
@@ -93,7 +94,8 @@ public static class AudioSetup
             else Debug.LogWarning("Could not measure the riser; keeping its current envelope and peak.");
         }
 
-        Migrate(so);
+        AssignVentClips(so);
+        MigrateBank(so);
         so.ApplyModifiedProperties();
         EditorUtility.SetDirty(bank);
         AssetDatabase.SaveAssets();
@@ -102,35 +104,81 @@ public static class AudioSetup
         if (missing.Count > 0) Debug.LogError($"Audio clips not found in {Folder}: {string.Join(", ", missing)}");
     }
 
-    // One-off tuning changes, applied once per version so your own later edits are never overwritten.
-    static void Migrate(SerializedObject so)
+    // One-off tuning changes, applied once per version. A value is only changed while it still holds the previous default, so your own
+    // later edits are never overwritten; every change (and every kept value) is logged. Also used by
+    // Alien > Apply Creature Pressure And Audio Tuning. Returns how many values changed.
+    internal static int MigrateBank(SerializedObject so)
     {
         var version = so.FindProperty("tuningVersion");
-        void Float(string field, float value, int v)
+        int changed = 0;
+        void FromDefault(string field, float previous, float value, int v)
         {
             var p = so.FindProperty(field);
+            if (p == null) { Debug.LogWarning($"AudioBank has no field '{field}'."); return; }
             if (Mathf.Approximately(p.floatValue, value)) return;
+            if (!Mathf.Approximately(p.floatValue, previous))
+            {
+                Debug.Log($"AudioBank {field}: kept your value {p.floatValue} (tuning version {v} would set {value}).");
+                return;
+            }
             Debug.Log($"AudioBank {field}: {p.floatValue} -> {value} (tuning version {v})");
             p.floatValue = value;
+            changed++;
         }
         if (version.intValue < 2)
         {
-            Float("riserVolume", 0.5f, 2);            // quieter; the new riser is also lower in pitch
-            Float("scaredBreathVolume", 0.3f, 2);     // player breathing was too loud
-            Float("runBreathVolume", 0.35f, 2);
-            Float("riserWindow", 8f, 2);              // the new riser is a long sustained drone: longer stretches between cuts,
-            Float("riserTolerance", 3f, 2);
-            Float("riserCrossfade", 1.5f, 2);         // and slower blends
+            FromDefault("riserVolume", 0.8f, 0.5f, 2);           // quieter; the new riser is also lower in pitch
+            FromDefault("scaredBreathVolume", 0.5f, 0.3f, 2);    // player breathing was too loud
+            FromDefault("runBreathVolume", 0.6f, 0.35f, 2);
+            FromDefault("riserWindow", 1.2f, 8f, 2);             // the new riser is a long sustained drone: longer stretches between cuts,
+            FromDefault("riserTolerance", 0.5f, 3f, 2);
+            FromDefault("riserCrossfade", 0.45f, 1.5f, 2);       // and slower blends
             version.intValue = 2;
         }
         if (version.intValue < 3)
         {
-            Float("scaredBreathVolume", 0.15f, 3);    // breathing still too loud
-            Float("runBreathVolume", 0.18f, 3);
-            Float("runBreathOnStamina", 0.2f, 3);     // only after a real effort, not every sprint...
-            Float("runBreathOffStamina", 0.5f, 3);    // ...and it ends sooner (plus a cooldown between spells)
+            FromDefault("scaredBreathVolume", 0.3f, 0.15f, 3);   // breathing still too loud
+            FromDefault("runBreathVolume", 0.35f, 0.18f, 3);
+            FromDefault("runBreathOnStamina", 0.35f, 0.2f, 3);   // only after a real effort, not every sprint...
+            FromDefault("runBreathOffStamina", 0.7f, 0.5f, 3);   // ...and it ends sooner (plus a cooldown between spells)
             version.intValue = 3;
         }
+        if (version.intValue < 4)
+        {
+            // Creature footsteps carried too far: full volume only close, a perceptual fall, silent by about 22 m, fully 3D (a flat
+            // share never fades with distance), and a touch quieter.
+            FromDefault("monsterStepFullDistance", 6f, 3.5f, 4);
+            FromDefault("monsterStepMaxDistance", 34f, 22f, 4);
+            FromDefault("monsterStepSpatial", 0.85f, 1f, 4);
+            FromDefault("monsterFootstepVolume", 1f, 0.9f, 4);
+            version.intValue = 4;
+        }
+        return changed;
+    }
+
+    // Optional dedicated vent clips: any file in Assets/Sounds whose name contains VENT and ENTER / TRAVEL (or RATTLE, DUCT) / WARN / EXIT.
+    // Without them the creature uses a short piece of the door sound for the grille and the warning, and the duct stays silent.
+    static void AssignVentClips(SerializedObject so)
+    {
+        var files = Directory.GetFiles(Folder).Where(f => f.EndsWith(".wav") || f.EndsWith(".mp3") || f.EndsWith(".ogg")).Select(f => f.Replace('\\', '/')).ToArray();
+        string Find(params string[] words) => files.FirstOrDefault(f =>
+        {
+            string n = Path.GetFileNameWithoutExtension(f).ToUpperInvariant();
+            return n.Split('_', '-', ' ').Contains("VENT") && words.Any(n.Contains); // the word VENT, not EVENT
+        });
+        var found = new List<string>();
+        foreach (var (field, words) in new[] { ("ventEnter", new[] { "ENTER" }), ("ventTravel", new[] { "TRAVEL", "RATTLE", "DUCT" }), ("ventWarning", new[] { "WARN" }), ("ventExit", new[] { "EXIT" }) })
+        {
+            string path = Find(words);
+            if (path == null) continue;
+            Prepare(path, true, true, false, true);
+            var clip = AssetDatabase.LoadAssetAtPath<AudioClip>(path);
+            if (clip == null) continue;
+            so.FindProperty(field).objectReferenceValue = clip;
+            found.Add($"{field} = {Path.GetFileName(path)}");
+        }
+        if (found.Count > 0) Debug.Log($"Vent clips: {string.Join(", ", found)}.");
+        else Debug.Log("No dedicated vent clips in Assets/Sounds (names containing VENT and ENTER, TRAVEL, WARN or EXIT): the grille and the pre-emergence warning use a short piece of the door sound, the duct rattle is silent.");
     }
 
     static void Set(SerializedObject so, string field, AudioClip clip)

@@ -246,6 +246,7 @@ public static partial class ShipBuilder
     {
         ValidateSurvival();
         ValidateVentilation();
+        ValidateAtmosphere();
     }
 
     /// <summary>Checks the room links and the vent network. Logs a summary; no per-frame output.</summary>

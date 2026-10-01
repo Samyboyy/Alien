@@ -96,6 +96,40 @@ public static class AudioRules
     public static float EngageRemaining(bool sameRoomOrInSight, float remaining, float dt, float linger) =>
         sameRoomOrInSight ? linger : System.Math.Max(0f, remaining - dt);
 
+    /// <summary>
+    /// Perceptual distance attenuation for important world sounds: full volume inside <paramref name="full"/>, then an inverse-distance
+    /// fall that is pulled smoothly to silence at <paramref name="max"/>. Strictly decreasing between the two; 0 at and beyond max.
+    /// </summary>
+    public static float DistanceAttenuation(float distance, float full, float max)
+    {
+        if (distance <= full) return 1f;
+        if (distance >= max) return 0f;
+        float t = (distance - full) / System.Math.Max(0.001f, max - full);
+        return full / distance * (1f - t * t);
+    }
+
+    /// <summary>
+    /// How occluded a sound is, 0..1, from the number of solid things (walls, closed doors) on the straight line to the listener.
+    /// Each one takes the same share of what is left, so it rises quickly but never reaches 1.
+    /// </summary>
+    public static float OcclusionAmount(int obstacles, float perObstacle)
+    {
+        if (obstacles <= 0) return 0f;
+        float p = perObstacle < 0f ? 0f : perObstacle > 0.95f ? 0.95f : perObstacle;
+        return 1f - (float)System.Math.Pow(1f - p, obstacles);
+    }
+
+    /// <summary>Volume multiplier for an occlusion amount: 1 when clear, never below <paramref name="occludedGain"/> (so never silent).</summary>
+    public static float OcclusionGain(float amount, float occludedGain)
+    {
+        float g = occludedGain < 0.05f ? 0.05f : occludedGain > 1f ? 1f : occludedGain;
+        return 1f - Clamp01(amount) * (1f - g);
+    }
+
+    /// <summary>Low-pass cutoff for an occlusion amount, interpolated in octaves between the clear and the fully occluded cutoff.</summary>
+    public static float OcclusionCutoff(float amount, float clearHz, float occludedHz) =>
+        clearHz * (float)System.Math.Pow(occludedHz / System.Math.Max(10f, clearHz), Clamp01(amount));
+
     /// <summary>Seconds between heartbeats: slow when the creature is barely near, fast when it is on top of you.</summary>
     public static float HeartbeatInterval(float level, float slowSeconds, float fastSeconds) =>
         slowSeconds + (fastSeconds - slowSeconds) * Clamp01(level);

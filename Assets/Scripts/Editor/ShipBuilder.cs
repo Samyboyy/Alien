@@ -93,6 +93,7 @@ public static partial class ShipBuilder
         BuildFromMap();
         AddHidingAndRooms(); // survival additions: furniture, room volumes, search points (ShipSurvival.cs)
         AddCreatureVentilation(); // room connections with their doors, and the creature vent network (ShipVentilation.cs)
+        AddShipAtmosphere(); // ceiling, lights, interior Volume and acoustic zones (ShipAtmosphereBuilder.cs)
         CreatureSetup.GetOrCreateSurface();
         EditorSceneManager.SaveScene(scene);
 

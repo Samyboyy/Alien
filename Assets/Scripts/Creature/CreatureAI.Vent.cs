@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Text;
 using Unity.Netcode;
 using UnityEngine;
 using UnityEngine.AI;
@@ -7,20 +6,28 @@ using UnityEngine.AI;
 public enum VentPhase : byte { None, Approaching, Entering, Travelling, Preparing, Exiting }
 
 /// <summary>
-/// Creature-only ventilation (host only decisions). The creature may use a vent to REPOSITION towards remembered evidence, never to
-/// reach a player it can see on foot and never from knowledge of where anyone is: the destination is its own evidence (last confirmed
-/// sighting, accepted sound) or, on heightened patrol, its next patrol point. Vents are chosen only when the whole trip (walk to the
-/// entrance, ride the duct, walk from the exit) is clearly faster than going on foot, and not again before a cooldown.
+/// Creature-only ventilation (host only decisions). The creature uses vents to REPOSITION towards what it knows: its own evidence
+/// (last confirmed sighting, accepted sounds), its search memory, and on hunting patrol a stale or recently active room. It never
+/// reads a hidden player's position to choose a route or an exit, and never vents while it has a confirmed sighting or is chasing.
+///
+/// How often: an explicit, seeded vent DESIRE (VentCadence). After each trip (and at the round start) a random value from the round
+/// seed fixes when desire reaches 1: about 10-15 s for the first tactical trip, 40-60 s on calm hunting, 20-35 s when alert or
+/// searching, shortened by frustration (time since it last saw anyone), never sooner than the absolute minimum (ventCooldown). Desire
+/// only ENCOURAGES: while it is high the creature looks for a trip every few seconds and accepts trips that are a little slower than
+/// walking, but a trip still needs a reachable entrance, a connected exit and a fair emergence.
 ///
 /// A trip is explicit state in the replicated <see cref="VentPhase"/> (CreatureState.Vent while it lasts):
 ///   Approaching - walks to the entrance on the NavMesh. Fresh sight cancels it.
 ///   Entering    - faces the vent and waits a short delay (animation hook); sight still cancels. Then it COMMITS: the agent and collider
 ///                 are switched off and it walks through the mouth into the wall.
 ///   Travelling  - follows the authored duct route at ventSpeed, continuously, at its real position (the body is hidden inside the
-///                 walls). No ground perception runs. At a junction it may re-plan if NEW evidence was heard.
-///   Preparing   - waits at the hidden pre-exit point for the warning period (audio/animation hook), and for the exit to be clear.
+///                 walls). No ground SIGHT runs; hearing is sampled a few times a second and the best new sound is held until the next
+///                 junction, where it may change the exit (never mid-duct).
+///   Preparing   - waits at the hidden pre-exit point for the warning period (the warning sound plays at the exit), and for the exit
+///                 to be clear of every living player.
 ///   Exiting     - walks out through the mouth onto the NavMesh, re-enables the agent and resumes towards the evidence.
-/// Only the phase is replicated (plus the ordinary NetworkTransform position), so late joiners see the right state.
+/// Replicated: the phase, and the entry and exit ids (small values for presentation and late joiners); position by the usual
+/// NetworkTransform.
 /// </summary>
 public partial class CreatureAI
 {
@@ -29,15 +36,26 @@ public partial class CreatureAI
     [Tooltip("Metres per second along the duct")] public float ventSpeed = 5f;
     [Tooltip("Pause at the mouth before going in (a future animation)")] public float ventEntryDelay = 1f;
     [Tooltip("Warning before it emerges, at the hidden pre-exit point (seconds)")] public float ventWarning = 1.25f;
-    [Tooltip("Seconds after a trip before another may start")] public float ventCooldown = 45f;
-    [Tooltip("No vent trips this long after a round starts")] public float ventFirstDelay = 20f;
-    [Tooltip("The trip must save at least this many seconds over walking")] public float ventMinAdvantage = 4f;
+    [Tooltip("ABSOLUTE minimum seconds between the end of one trip and the start of the next, whatever the desire")] public float ventCooldown = 18f;
+    [Tooltip("The trip must save at least this many seconds over walking (after desire and patrol slack)")] public float ventMinAdvantage = 4f;
     [Tooltip("...and take no more than this fraction of the walking time")] [Range(0.2f, 1f)] public float ventMaxTimeFraction = 0.8f;
     [Tooltip("Never bother for destinations closer than this on foot (m)")] public float ventMinGroundMetres = 15f;
-    [Tooltip("A sound must have at least this outer range to be worth a vent trip (sprinting 14, doors 10)")] public float ventMinLoudness = 12f;
+    [Tooltip("A sound must have at least this outer range to be worth a vent trip on its own (sprinting 14, doors 10)")] public float ventMinLoudness = 12f;
     [Tooltip("An entrance further than this from the creature is not considered (m)")] public float ventEntryMaxMetres = 40f;
-    [Tooltip("While hunting on patrol (no evidence), a vent is taken even if it is only this many seconds slower than the walk: vents are part of the strategy, not just a shortcut")] public float ventPatrolBias = 12f;
+    [Tooltip("While hunting on patrol (no evidence), a vent is taken even if it is only this many seconds slower than the walk")] public float ventPatrolBias = 12f;
     [Tooltip("Penalty (s) for an entrance used a moment ago; fades with age")] public float ventReusePenalty = 15f;
+
+    [Header("Vent cadence (desire; seeded from the round seed)")]
+    [Tooltip("The first tactical trip of a round may come this soon after the start (s, random in the range)")] public float ventFirstMin = 10f;
+    public float ventFirstMax = 15f;
+    [Tooltip("Calm hunting: desire reaches 1 this long after the previous trip (s, random in the range)")] public float ventCalmMin = 40f;
+    public float ventCalmMax = 60f;
+    [Tooltip("Alert or searching: desire reaches 1 this long after the previous trip (s, random in the range)")] public float ventAlertMin = 20f;
+    public float ventAlertMax = 35f;
+    [Tooltip("At full frustration the interval shrinks to this fraction (still never below ventCooldown)")] [Range(0.2f, 1f)] public float ventFrustratedFactor = 0.75f;
+    [Tooltip("Once it wants a vent, a trip may be this many seconds slower than walking (up to twice this as desire keeps growing)")] public float ventDesireBias = 25f;
+    [Tooltip("While it wants a vent, it looks for a trip this often (s)")] public float ventDesireCheckSeconds = 2.5f;
+    [Tooltip("While it wants a vent, destinations down to this far on foot are worth it (m)")] public float ventDesireMinGroundMetres = 12f;
 
     [Header("Vents as a hunting tactic (frustration)")]
     [Tooltip("Frustration starts rising this long after it last SAW a player (s)")] public float ventFrustrationGrace = 20f;
@@ -45,17 +63,34 @@ public partial class CreatureAI
     [Tooltip("At full frustration, patrol vent trips are accepted even if this many seconds slower than walking, and it favours far rooms")] public float ventFrustrationBonus = 45f;
     [Tooltip("At full frustration, trips down to this many metres on foot are considered")] public float ventFrustratedMinGround = 6f;
 
-    [Header("Vent emergence fairness")]
+    [Header("Hearing in the duct")]
+    [Tooltip("How often it listens while travelling in a duct (s)")] public float ventHearInterval = 0.25f;
+    [Tooltip("A sound heard in the duct is kept this long for the next junction (s)")] public float ventPendingMaxAge = 10f;
+    [Tooltip("Re-plan at a junction only if the new exit is this many seconds better")] public float ventReplanGain = 3f;
+
+    [Header("Vent emergence fairness (every living player is checked)")]
     [Tooltip("Never emerge with a living player closer than this to the exit (m)")] public float emergeMinPlayerDistance = 2.5f;
-    [Tooltip("An exit a player can see from closer than this is penalised, unless it is hunting evidence there (m)")] public float emergeViewDistance = 10f;
+    [Tooltip("An exit ANY player can see from closer than this is penalised, unless it is hunting evidence there (m)")] public float emergeViewDistance = 10f;
     [Tooltip("Penalty (s) for an exit in a player's direct view")] public float emergeViewPenalty = 12f;
     [Tooltip("Evidence within this distance of an exit counts as hunting there (m)")] public float emergeNearEvidence = 6f;
     [Tooltip("Wait this long for a blocked or watched exit before trying another")] public float emergeWaitMax = 5f;
     [Tooltip("After this long it emerges anyway, as long as the spot is physically clear")] public float emergeGiveUp = 25f;
-    [Tooltip("Re-plan at a junction only if the new exit is this many seconds better")] public float ventReplanGain = 3f;
+
+    enum HearMode : byte { Act, Pending }
+
+    struct HeardSound
+    {
+        public Vector3 position;
+        public float strength;
+        public ulong emitter;
+    }
 
     readonly NetworkVariable<VentPhase> ventPhase = new(VentPhase.None);
+    readonly NetworkVariable<sbyte> ventEntryNet = new(-1); // presentation only: where the entry sounds play
+    readonly NetworkVariable<sbyte> ventExitNet = new(-1);  // presentation only: where the warning and exit sounds play
     public VentPhase CurrentVentPhase => ventPhase.Value;
+    public int VentEntryId => ventEntryNet.Value;
+    public int VentExitId => ventExitNet.Value;
 
     Renderer[] ventRenderers;
     CapsuleCollider ventCollider;
@@ -63,20 +98,40 @@ public partial class CreatureAI
     readonly List<Vector3> ventPoints = new(), ventTmp = new();
     readonly List<(int index, int node)> ventJunctions = new();
     readonly List<int> ventHistory = new();
-    float[] ventCum = new float[0];
+    readonly List<float> fairDistances = new();
+    readonly List<bool> fairViews = new();
+    readonly PendingEvidence<HeardSound> ventPending = new();
+    float[] ventCum = new float[0], ventExitM = new float[0], ventExitPen = new float[0];
     CreatureState ventResume;
     string ventReason = "-", ventEvidenceNote = "-";
     int ventEntry = -1, ventExit = -1, ventNextJunction;
-    bool ventCommitted, ventAltTried;
-    float ventTimer, ventWait, ventTravelled, ventLength, ventEnterEnd, ventTick, ventWatchdog, ventPlanSeconds, ventGroundSeconds;
+    bool ventCommitted, ventAltTried, ventFirstOfRound = true;
+    float ventTimer, ventWait, ventTravelled, ventLength, ventEnterEnd, ventTick, ventHearTimer, ventWatchdog, ventPlanSeconds, ventGroundSeconds;
+    float ventCycleU = 0.5f, ventDesireTimer;
     double lastVentEnd = double.NegativeInfinity, lastSightedAt;
+    double ventCycleStart; // desire is measured from here: the round start, then the end of each trip
+    int ventTrips;
+    System.Random ventRng = new(7); // reseeded every round from the round seed, separately from other choices
     string ventVerdict = "-"; // why the last consideration did or did not lead to a vent (for F3)
 
     /// <summary>
     /// 0..1: how long it has gone without SEEING a player (after a grace period). The longer it has had no success, the more it wants to
-    /// switch tactics: vents become more attractive and far, stale rooms are preferred. Based only on its own sightings.
+    /// switch tactics: vents come sooner and far, stale rooms are preferred. Based only on its own sightings.
     /// </summary>
     float Frustration() => Mathf.Clamp01(((float)(Time.timeAsDouble - lastSightedAt) - ventFrustrationGrace) / Mathf.Max(1f, ventFrustrationSeconds));
+
+    // How alert it is for cadence purposes: hunting real evidence (searching, investigating or pursuing it) counts as fully alert;
+    // otherwise its alertness, which only evidence raises and which fades on patrol. A calm room-to-room hunt, or searching the room it
+    // came out of a vent into, is NOT alert, so it does not shorten the cadence by itself.
+    float VentAlert() => evidenceKind != EvidenceKind.None && state.Value is CreatureState.Search or CreatureState.Investigate or CreatureState.Pursue
+        ? 1f : Mathf.Clamp01(alertness);
+
+    float VentInterval() => VentCadence.Interval(ventFirstOfRound, VentAlert(), ventCycleU, ventFirstMin, ventFirstMax, ventCalmMin, ventCalmMax,
+        ventAlertMin, ventAlertMax, Frustration(), ventFrustratedFactor, ventCooldown);
+
+    float VentDesire() => VentCadence.Desire(Time.timeAsDouble - ventCycleStart, VentInterval());
+
+    void NewVentCycle() => ventCycleU = (float)ventRng.NextDouble();
 
     static CreatureVentNetwork VentNet => CreatureVentNetwork.Instance;
     bool VentReady => ventEnabled && VentNet != null && VentNet.Ready;
@@ -87,7 +142,7 @@ public partial class CreatureAI
         if (ventCollider == null) ventCollider = GetComponent<CapsuleCollider>();
     }
 
-    // Every peer: the body is hidden while inside the walls and ducts, visible at the mouth. Also the hook for cosmetic audio.
+    // Every peer: the body is hidden while inside the walls and ducts, visible at the mouth. Also drives the cosmetic vent audio.
     void OnVentPhaseChanged(VentPhase previous, VentPhase now)
     {
         ApplyVentVisuals(now);
@@ -121,88 +176,139 @@ public partial class CreatureAI
 
     float ResumeSpeed(CreatureState s) => s == CreatureState.Patrol ? patrolSpeed : SpeedFor(s);
 
-    // Fairness inputs for emerging at a point. Players' positions are used ONLY to reject or penalise an unsafe exit; nothing is
-    // stored or fed to the creature's evidence.
-    void NearestPlayerTo(Vector3 point, out float distance, out bool hasView)
+    // Fairness inputs for emerging at a point, from EVERY living player independently (VentRules.AggregateWatch): the nearest distance,
+    // and whether anyone close enough can see it. Used ONLY to reject or penalise an unsafe exit; nothing is stored, nothing becomes
+    // evidence, heat or memory.
+    void ExitFairness(Vector3 point, out float nearest, out bool watched)
     {
-        distance = float.MaxValue;
-        hasView = false;
+        fairDistances.Clear();
+        fairViews.Clear();
         foreach (var client in NetworkManager.ConnectedClientsList)
         {
             if (client.PlayerObject == null || !client.PlayerObject.TryGetComponent(out NetworkFirstPersonController p) || !Alive(p)) continue;
-            Vector3 d = Flat(p.transform.position - point);
-            float dist = d.magnitude;
-            if (dist >= distance) continue;
-            distance = dist;
-            Vector3 head = p.transform.position + Vector3.up * 1.6f, to = point + Vector3.up - head;
-            hasView = Vector3.Dot(Flat(p.transform.forward).normalized, Flat(to).normalized) > 0.3f
-                && !Physics.Linecast(head, point + Vector3.up, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+            float dist = Flat(p.transform.position - point).magnitude;
+            bool view = false;
+            if (dist < emergeViewDistance)
+            {
+                Vector3 head = p.transform.position + Vector3.up * 1.6f, to = point + Vector3.up - head;
+                view = Vector3.Dot(Flat(p.transform.forward).normalized, Flat(to).normalized) > 0.3f
+                    && !Physics.Linecast(head, point + Vector3.up, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+            }
+            fairDistances.Add(dist);
+            fairViews.Add(view);
         }
+        VentRules.AggregateWatch(fairDistances, fairViews, fairDistances.Count, emergeViewDistance, out nearest, out watched);
     }
 
     float ExitPenalty(CreatureVentEntrance e, Vector3 target, bool hasTarget)
     {
-        NearestPlayerTo(e.approach.position, out float dist, out bool view);
+        ExitFairness(e.approach.position, out float dist, out bool watched);
         bool pursuingHere = hasTarget && Flat(target - e.approach.position).magnitude <= emergeNearEvidence;
-        float p = VentRules.ExitPenalty(dist, view, pursuingHere, emergeMinPlayerDistance, emergeViewDistance, emergeViewPenalty);
+        float p = VentRules.ExitPenalty(dist, watched, pursuingHere, emergeMinPlayerDistance, emergeViewDistance, emergeViewPenalty);
         return p + VentRules.ReusePenalty(e.id, ventHistory, ventReusePenalty);
     }
 
+    void EnsureVentBuffers(int n)
+    {
+        if (ventExitM.Length != n) { ventExitM = new float[n]; ventExitPen = new float[n]; }
+    }
+
     /// <summary>
-    /// Considers a vent trip towards <paramref name="target"/> (the creature's own evidence or next patrol point). Returns true if one
-    /// began. Never during a chase, never with a player confirmed in sight, never inside the cooldown.
+    /// Considers a vent trip towards <paramref name="target"/> (the creature's own evidence or hunting target). Returns true if one
+    /// began. Never with a confirmed sighting, never in a chase, never inside the absolute minimum interval.
     /// </summary>
     bool ConsiderVent(string why, CreatureState resume, Vector3 target, string evidenceNote)
     {
         if (!VentReady) { ventVerdict = "no vent network"; return false; }
-        if (state.Value is CreatureState.Chase or CreatureState.Bash or CreatureState.Vent) return false;
-        if (NearestRecognised() != null) { ventVerdict = "a player is in sight"; return false; } // a confirmed sighting: no leaving the ground route
+        if (state.Value is CreatureState.Bash or CreatureState.Vent) return false;
         double now = Time.timeAsDouble;
-        float frustration = resume == CreatureState.Patrol ? Frustration() : 0f;
-        if (!VentRules.CooldownReady(now, lastVentEnd, ventCooldown * (1f - 0.6f * frustration)))
-        { ventVerdict = $"cooldown ({lastVentEnd + ventCooldown * (1f - 0.6f * frustration) - now:0}s)"; return false; }
+        bool sight = NearestRecognised() != null;
+        if (!VentCadence.MayConsider(sight, state.Value == CreatureState.Chase, now, lastVentEnd, ventCooldown))
+        {
+            ventVerdict = sight ? "a player is in sight" : state.Value == CreatureState.Chase ? "chasing" : $"minimum interval ({lastVentEnd + ventCooldown - now:0}s)";
+            return false;
+        }
 
+        float frustration = resume == CreatureState.Patrol ? Frustration() : 0f;
+        float desire = VentDesire();
         float ground = PathMetres(transform.position, target, false);
         bool blocked = ground < 0f;
         if (blocked) ground = Vector3.Distance(transform.position, target) * 1.5f; // no route at all: assume a long way round
         float minGround = Mathf.Lerp(ventMinGroundMetres, ventFrustratedMinGround, frustration);
+        if (desire >= 1f) minGround = Mathf.Min(minGround, ventDesireMinGroundMetres);
         if (ground < minGround) { ventVerdict = $"too close to bother ({ground:0} m, needs {minGround:0})"; return false; }
         float walk = ResumeSpeed(resume);
-        // On patrol a vent is a tactic, not just a shortcut: the more frustrated it is, the slower a trip it will still take.
-        float bias = resume == CreatureState.Patrol ? ventPatrolBias + frustration * ventFrustrationBonus : 0f;
+        // On patrol a vent is a tactic, not just a shortcut; and once it WANTS a vent, a little slower trip is still fine.
+        float bias = (resume == CreatureState.Patrol ? ventPatrolBias + frustration * ventFrustrationBonus : 0f) + VentCadence.Bias(desire, ventDesireBias);
         float groundSeconds = ground / walk + (blocked ? 15f : 0f) + bias;
 
         var net = VentNet;
         int n = net.EntranceCount;
         var entryM = new float[n];
-        var exitM = new float[n];
         var entryPen = new float[n];
-        var exitPen = new float[n];
+        EnsureVentBuffers(n);
         for (int i = 0; i < n; i++)
         {
             var e = net.entrances[i];
             bool ok = e != null && e.usable && e.approach != null;
             float toEntry = ok ? PathMetres(transform.position, e.approach.position, true) : -1f;
             entryM[i] = toEntry > ventEntryMaxMetres ? -1f : toEntry;
-            exitM[i] = ok ? PathMetres(e.approach.position, target, false) : -1f; // doors on the ground leg can be opened
+            ventExitM[i] = ok ? PathMetres(e.approach.position, target, false) : -1f; // doors on the ground leg can be opened
             entryPen[i] = ok ? VentRules.ReusePenalty(e.id, ventHistory, ventReusePenalty) : 0f;
-            exitPen[i] = ok ? ExitPenalty(e, target, true) : 0f;
+            ventExitPen[i] = ok ? ExitPenalty(e, target, true) : 0f;
         }
-        var plan = VentRules.Choose(net.Graph, entryM, exitM, entryPen, exitPen, groundSeconds, walk, ventSpeed, ventMinAdvantage, ventMaxTimeFraction);
+        var plan = VentRules.Choose(net.Graph, entryM, ventExitM, entryPen, ventExitPen, groundSeconds, walk, ventSpeed, ventMinAdvantage, ventMaxTimeFraction);
         if (!plan.found)
         {
             // For the F3 line: what the best trip would have been, and why it was not good enough.
-            var any = VentRules.Choose(net.Graph, entryM, exitM, entryPen, exitPen, groundSeconds, walk, ventSpeed, -9999f, 9999f);
-            ventVerdict = any.found ? $"best trip {any.seconds:0}s vs {groundSeconds:0}s on foot (frustration {frustration:0.00}): not worth it"
-                : $"no usable entrance/exit pair (frustration {frustration:0.00})";
+            var any = VentRules.Choose(net.Graph, entryM, ventExitM, entryPen, ventExitPen, groundSeconds, walk, ventSpeed, -9999f, 9999f);
+            ventVerdict = any.found ? $"best trip {any.seconds:0}s vs {groundSeconds:0}s on foot (desire {desire:0.00}, frustration {frustration:0.00}): not worth it"
+                : $"no usable entrance/exit pair (desire {desire:0.00})";
             return false;
         }
 
-        ventVerdict = $"taken (frustration {frustration:0.00})";
+        ventVerdict = $"taken (desire {desire:0.00}, frustration {frustration:0.00})";
         ventPlanSeconds = plan.seconds;
         ventGroundSeconds = groundSeconds;
         BeginVent(plan.entry, plan.exit, why, resume, evidenceNote);
         return true;
+    }
+
+    /// <summary>
+    /// While it WANTS a vent (desire at least 1), look for a useful trip every few seconds: towards its evidence when it has some,
+    /// otherwise towards a deliberately chosen stale or recently active room. Never into the room it is already in, never while
+    /// looking under furniture or still searching the room it is in. Returns true if a trip began.
+    /// </summary>
+    bool TickVentDesire()
+    {
+        if (!VentReady || (ventDesireTimer -= Time.deltaTime) > 0f) return false;
+        ventDesireTimer = ventDesireCheckSeconds;
+        if (VentDesire() < 1f) return false;
+        if (state.Value == CreatureState.Search && step == SearchStep.Inspect) return false; // never mid-look under furniture
+        if (state.Value == CreatureState.Search && arrived && searchPhase == SearchPhase.Local) return false; // finish the room it is searching first
+
+        var hereRoom = RoomAt(transform.position);
+        Vector3 aim;
+        string why, note;
+        CreatureState resume;
+        if (evidenceKind != EvidenceKind.None && state.Value != CreatureState.Patrol)
+        {
+            aim = evidencePos;
+            why = "wants a vent: reposition towards the evidence";
+            note = EvidenceNote();
+            resume = state.Value;
+        }
+        else
+        {
+            if (!PickHuntRoom(preferFar: true, out var room, out _, out _)) { ventVerdict = "wants a vent, but no room to hunt"; return false; }
+            aim = RoomAim(room);
+            why = $"wants a vent: hunting {room.roomName}";
+            note = "room staleness and heat, no player position";
+            resume = state.Value == CreatureState.Patrol ? CreatureState.Patrol : CreatureState.Search;
+        }
+        var aimRoom = RoomAt(aim);
+        if (aimRoom != null && aimRoom == hereRoom) { ventVerdict = "wants a vent, but the destination is in this room"; return false; }
+        return ConsiderVent(why, resume, aim, note);
     }
 
     string EvidenceNote() => evidenceKind == EvidenceKind.None ? "none"
@@ -214,12 +320,15 @@ public partial class CreatureAI
     {
         ventEntry = entry;
         ventExit = exit;
+        ventEntryNet.Value = (sbyte)entry;
+        ventExitNet.Value = (sbyte)exit;
         ventResume = resume;
         ventReason = why;
         ventEvidenceNote = evidenceNote;
         ventAltTried = ventCommitted = false;
         ventTimer = ventWait = ventTravelled = 0f;
-        ventTick = 0f;
+        ventTick = ventHearTimer = 0f;
+        ventPending.Clear();
         ventWatchdog = 25f + VentNet.Graph.Distance(entry, exit) / Mathf.Max(0.5f, ventSpeed);
         ClearSearch(false);
         bashDoor = null;
@@ -240,7 +349,9 @@ public partial class CreatureAI
     void CancelVent(string why)
     {
         ventPhase.Value = VentPhase.None;
+        ventEntryNet.Value = ventExitNet.Value = -1;
         ventCommitted = false;
+        ventPending.Clear();
         reason = $"vent cancelled: {why}";
     }
 
@@ -258,18 +369,27 @@ public partial class CreatureAI
         return ventResume == CreatureState.Patrol ? CreatureState.Search : ventResume;
     }
 
-    // Round reset: put everything back. Returns nothing; the caller warps the creature to its start afterwards.
-    void ResetVent(Vector3 startPosition)
+    // Round reset: put everything back. The caller warps the creature to its start afterwards.
+    void ResetVent(Vector3 startPosition, int seed)
     {
         bool wasCommitted = ventCommitted || !agent.enabled;
         ventPhase.Value = VentPhase.None;
+        ventEntryNet.Value = ventExitNet.Value = -1;
         ventCommitted = false;
         ventHistory.Clear();
         ventPoints.Clear();
+        ventPending.Clear();
         ventEntry = ventExit = -1;
         ventReason = ventEvidenceNote = "-";
-        lastVentEnd = Time.timeAsDouble - ventCooldown + ventFirstDelay; // first trip only after ventFirstDelay
-        lastSightedAt = Time.timeAsDouble; // frustration counts from the start of the round
+        ventRng = new System.Random(seed);
+        ventFirstOfRound = true;
+        ventTrips = 0;
+        NewVentCycle();
+        double now = Time.timeAsDouble;
+        lastVentEnd = double.NegativeInfinity; // no trip yet: the minimum interval does not apply, the first-trip range does
+        ventCycleStart = now;
+        lastSightedAt = now; // frustration counts from the start of the round
+        ventDesireTimer = ventDesireCheckSeconds;
         ventVerdict = "-";
         CacheVentParts();
         if (ventCollider != null) ventCollider.enabled = true;
@@ -299,6 +419,13 @@ public partial class CreatureAI
             if (Acquire()) return;
         }
 
+        // In the duct: listen (never look), and keep the best new sound for the next junction.
+        if (phase == VentPhase.Travelling && (ventHearTimer -= dt) <= 0f)
+        {
+            ventHearTimer = ventHearInterval;
+            Hear(HearMode.Pending);
+        }
+
         switch (phase)
         {
             case VentPhase.Approaching: UpdateApproach(); break;
@@ -308,6 +435,23 @@ public partial class CreatureAI
             case VentPhase.Exiting: MoveAlongVent(dt); break;
             case VentPhase.Preparing: UpdatePreparing(dt); break;
         }
+    }
+
+    // Called by Hear in Pending mode: the best accepted sound is held, not acted on, until a junction.
+    void OfferPendingSound(Vector3 position, float strength, ulong emitter, bool pursued, double now)
+    {
+        var sound = new HeardSound { position = position, strength = strength, emitter = emitter };
+        if (ventPending.Offer(sound, strength + (pursued ? 2f : 0f), now, now, ventPendingMaxAge))
+            ventVerdict = $"heard something in the duct ({strength:0.00}), held for the next junction";
+    }
+
+    // A held sound becomes ordinary evidence (and room heat) when the creature reaches a junction or the end of the route.
+    bool AdoptPendingSound()
+    {
+        if (!ventPending.TryTake(Time.timeAsDouble, ventPendingMaxAge, out var sound)) return false;
+        lastSwitchTime = Time.timeAsDouble;
+        SetEvidence(EvidenceKind.Noise, sound.position, sound.strength, sound.emitter);
+        return true;
     }
 
     void UpdateApproach()
@@ -416,36 +560,36 @@ public partial class CreatureAI
         }
         if (ventTravelled >= ventLength)
         {
+            if (AdoptPendingSound()) ventEvidenceNote = EvidenceNote(); // heard on the last stretch: it heads there after emerging
             ventTimer = ventWait = 0f;
-            ventPhase.Value = VentPhase.Preparing; // the warning hook fires from the phase change on every peer
+            ventPhase.Value = VentPhase.Preparing; // the warning plays at the exit from the phase change, on every peer
         }
     }
 
-    // New evidence heard in the duct, at an actual junction, may change the exit. Nothing is read from any player.
+    // At an actual junction: a sound held since the last one becomes evidence, and may change the exit if that is clearly better
+    // under the gain rule. Nothing is read from any player.
     bool ReplanAtJunction(int node)
     {
-        double before = evidenceTime;
-        if (!Hear(true) || evidenceTime <= before || evidenceKind == EvidenceKind.None) return false;
+        if (!AdoptPendingSound()) return false;
         var net = VentNet;
         int n = net.EntranceCount;
-        var exitM = new float[n];
-        var exitPen = new float[n];
+        EnsureVentBuffers(n);
         for (int j = 0; j < n; j++)
         {
             var e = net.entrances[j];
             bool ok = e != null && e.usable && e.approach != null;
-            exitM[j] = ok ? PathMetres(e.approach.position, evidencePos, false) : -1f;
-            exitPen[j] = ok ? ExitPenalty(e, evidencePos, true) : 0f;
+            ventExitM[j] = ok ? PathMetres(e.approach.position, evidencePos, false) : -1f;
+            ventExitPen[j] = ok ? ExitPenalty(e, evidencePos, true) : 0f;
         }
         float walk = ResumeSpeed(ventResume);
-        int best = VentRules.BestExitFrom(net.Graph, node, exitM, exitPen, walk, ventSpeed, null);
+        int best = VentRules.BestExitFrom(net.Graph, node, ventExitM, ventExitPen, walk, ventSpeed, null);
+        ventEvidenceNote = EvidenceNote();
         if (best < 0 || best == ventExit) return false;
-        float Score(int j) => net.Graph.Distance(node, j) / ventSpeed + exitM[j] / walk + exitPen[j];
-        float current = ventExit >= 0 && exitM[ventExit] >= 0f ? Score(ventExit) : float.PositiveInfinity;
+        float Score(int j) => net.Graph.Distance(node, j) / ventSpeed + ventExitM[j] / walk + ventExitPen[j];
+        float current = ventExit >= 0 && ventExitM[ventExit] >= 0f ? Score(ventExit) : float.PositiveInfinity;
         if (Score(best) + ventReplanGain >= current) return false;
         if (!SwitchExit(node, best)) return false;
         ventReason += " (re-planned at a junction)";
-        ventEvidenceNote = EvidenceNote();
         return true;
     }
 
@@ -464,6 +608,7 @@ public partial class CreatureAI
         ventTravelled = 0f;
         ventNextJunction = 0;
         ventExit = newExit;
+        ventExitNet.Value = (sbyte)newExit;
         if (ventPhase.Value != VentPhase.Travelling) ventPhase.Value = VentPhase.Travelling;
         return true;
     }
@@ -484,9 +629,10 @@ public partial class CreatureAI
 
         var exit = VentNet.entrances[ventExit];
         bool blocked = ExitObstructed(exit);
-        NearestPlayerTo(exit.approach.position, out float dist, out bool view);
-        bool tooClose = dist < emergeMinPlayerDistance;
-        bool watched = view && dist < emergeViewDistance && !(evidenceKind != EvidenceKind.None && Flat(evidencePos - exit.approach.position).magnitude <= emergeNearEvidence);
+        ExitFairness(exit.approach.position, out float nearest, out bool seen);
+        bool tooClose = nearest < emergeMinPlayerDistance;
+        bool hunting = evidenceKind != EvidenceKind.None && Flat(evidencePos - exit.approach.position).magnitude <= emergeNearEvidence;
+        bool watched = seen && !hunting;
 
         if (!blocked && !tooClose && (!watched || ventWait >= emergeWaitMax)) { BeginExiting(); return; }
         if (ventWait >= emergeWaitMax && !ventAltTried)
@@ -501,17 +647,16 @@ public partial class CreatureAI
     {
         var net = VentNet;
         int n = net.EntranceCount;
-        Vector3 target = evidenceKind != EvidenceKind.None ? evidencePos : transform.position;
-        var exitM = new float[n];
-        var exitPen = new float[n];
+        Vector3 aim = evidenceKind != EvidenceKind.None ? evidencePos : transform.position;
+        EnsureVentBuffers(n);
         for (int j = 0; j < n; j++)
         {
             var e = net.entrances[j];
             bool ok = e != null && e.usable && e.approach != null && !ExitObstructed(e);
-            exitM[j] = ok ? PathMetres(e.approach.position, target, false) : -1f;
-            exitPen[j] = ok ? ExitPenalty(e, target, evidenceKind != EvidenceKind.None) : 0f;
+            ventExitM[j] = ok ? PathMetres(e.approach.position, aim, false) : -1f;
+            ventExitPen[j] = ok ? ExitPenalty(e, aim, evidenceKind != EvidenceKind.None) : 0f;
         }
-        int alt = VentRules.BestExitFrom(net.Graph, ventExit, exitM, exitPen, ResumeSpeed(ventResume), ventSpeed, new HashSet<int> { ventExit });
+        int alt = VentRules.BestExitFrom(net.Graph, ventExit, ventExitM, ventExitPen, ResumeSpeed(ventResume), ventSpeed, new HashSet<int> { ventExit });
         if (alt < 0 || !SwitchExit(ventExit, alt)) return false;
         ventReason += " (exit blocked, used another)";
         return true;
@@ -539,11 +684,16 @@ public partial class CreatureAI
         if (ventCollider != null) ventCollider.enabled = true;
         ventCommitted = false;
         ventPhase.Value = VentPhase.None;
-        lastVentEnd = Time.timeAsDouble;
+        ventEntryNet.Value = ventExitNet.Value = -1;
+        ventPending.Clear();
+        lastVentEnd = ventCycleStart = Time.timeAsDouble;
+        ventFirstOfRound = false;
+        ventTrips++;
+        NewVentCycle();
         ventHistory.Add(ventEntry);
         ventHistory.Add(ventExit);
         while (ventHistory.Count > 6) ventHistory.RemoveAt(0);
-        Debug.Log($"Creature vent: emerged at entrance {ventExit} ({exit.room?.roomName}).");
+        Debug.Log($"Creature vent: emerged at entrance {ventExit} ({exit.room?.roomName}); trip {ventTrips} this round.");
         AfterVent();
     }
 
@@ -565,14 +715,16 @@ public partial class CreatureAI
 
     string VentDebugText()
     {
-        double cooldown = lastVentEnd + ventCooldown - Time.timeAsDouble;
-        string cd = cooldown > 0 ? $"{cooldown:0}s" : "ready";
+        double minLeft = ventCooldown - (Time.timeAsDouble - lastVentEnd);
+        string gate = minLeft > 0 ? $"min interval {minLeft:0}s" : "ready";
+        string cadence = $"desire {VentDesire():0.00} (interval {VentInterval():0}s{(ventFirstOfRound ? ", first trip" : "")}, alert {VentAlert():0.00}), {gate}, frustration {Frustration():0.00}, trips {ventTrips}";
         var phase = ventPhase.Value;
         if (phase == VentPhase.None)
-            return $"idle, cooldown {cd}, frustration {Frustration():0.00}, last: {ventReason}\n  last decision: {ventVerdict}\n  evidence used: {ventEvidenceNote}";
+            return $"idle, {cadence}\n  last: {ventReason}\n  last decision: {ventVerdict}\n  evidence used: {ventEvidenceNote}";
         string route = ventCommitted ? $"{ventTravelled:0.0}/{ventLength:0.0} m, {VentRules.RemainingSeconds(ventLength, ventTravelled, ventSpeed):0.0}s left" : "not committed";
         string en = ventEntry >= 0 ? $"#{ventEntry}" : "-", ex = ventExit >= 0 ? $"#{ventExit}" : "-";
-        return $"{phase} entry {en} exit {ex}, {route}, cooldown {cd}\n  why: {ventReason}\n  evidence used: {ventEvidenceNote}";
+        string held = ventPending.Has ? $", holding a sound ({Time.timeAsDouble - ventPending.Time:0.0}s old)" : "";
+        return $"{phase} entry {en} exit {ex}, {route}{held}\n  {cadence}\n  why: {ventReason}\n  evidence used: {ventEvidenceNote}";
     }
 
     void DrawVentGizmos()

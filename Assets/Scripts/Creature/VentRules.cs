@@ -263,3 +263,74 @@ public sealed class PendingEvidence<T>
         Time = 0;
     }
 }
+
+/// <summary>
+/// Structural checks on the vent network, pure (Editor/Tests/VentRulesTests.cs). Edges are undirected, as the graph treats them: a duct can
+/// be travelled either way. The check never changes anything, and the same input always gives the same report.
+/// </summary>
+public static class VentValidation
+{
+    public sealed class Report
+    {
+        public int nodes, entrances, edges, validEdges, components;
+        public readonly List<string> problems = new();
+        public bool Valid => problems.Count == 0;
+    }
+
+    /// <summary>
+    /// <paramref name="present"/>: which node slots hold a real node (an entrance with its component and top point, a junction). Each edge
+    /// is a pair of node indices, -1 for an end that is missing or not a registered node. Entrances are nodes 0..entranceCount-1.
+    /// <paramref name="ids"/> (optional) are the entrances' stable ids, which must equal their position and be unique.
+    /// </summary>
+    public static Report Check(IList<bool> present, int entranceCount, IList<(int a, int b)> edges, IList<int> ids = null)
+    {
+        var r = new Report { nodes = present.Count, entrances = entranceCount, edges = edges.Count };
+        for (int i = 0; i < present.Count; i++)
+            if (!present[i]) r.problems.Add($"node {i} ({(i < entranceCount ? "entrance" : "junction")}) is missing");
+
+        if (ids != null)
+        {
+            var seen = new HashSet<int>();
+            for (int i = 0; i < ids.Count; i++)
+            {
+                if (!seen.Add(ids[i])) r.problems.Add($"entrance id {ids[i]} is used more than once");
+                else if (ids[i] != i) r.problems.Add($"entrance at position {i} has id {ids[i]}; ids must match their position");
+            }
+        }
+
+        var parent = new int[present.Count];
+        for (int i = 0; i < parent.Length; i++) parent[i] = i;
+        int Find(int x) { while (parent[x] != x) x = parent[x] = parent[parent[x]]; return x; }
+        var degree = new int[present.Count];
+        var pairs = new HashSet<(int, int)>();
+        for (int k = 0; k < edges.Count; k++)
+        {
+            var (a, b) = edges[k];
+            bool aOk = a >= 0 && a < present.Count && present[a], bOk = b >= 0 && b < present.Count && present[b];
+            if (!aOk) r.problems.Add($"edge {k}: start is {(a < 0 ? "missing or not a registered node" : $"node {a}, which is missing")}");
+            if (!bOk) r.problems.Add($"edge {k}: end is {(b < 0 ? "missing or not a registered node" : $"node {b}, which is missing")}");
+            if (!aOk || !bOk) continue;
+            if (a == b) { r.problems.Add($"edge {k}: starts and ends at node {a}"); continue; }
+            if (!pairs.Add((System.Math.Min(a, b), System.Math.Max(a, b)))) { r.problems.Add($"edge {k}: duplicates the run between nodes {System.Math.Min(a, b)} and {System.Math.Max(a, b)}"); continue; }
+            r.validEdges++;
+            degree[a]++;
+            degree[b]++;
+            parent[Find(a)] = Find(b);
+        }
+
+        var roots = new HashSet<int>();
+        for (int i = 0; i < present.Count; i++) if (present[i]) roots.Add(Find(i));
+        r.components = roots.Count;
+        if (roots.Count > 1) r.problems.Add($"the network is split into {roots.Count} separate parts");
+        for (int i = 0; i < entranceCount && i < present.Count; i++)
+        {
+            if (!present[i]) continue;
+            if (degree[i] == 0) { r.problems.Add($"entrance {i} has no duct"); continue; }
+            bool otherExit = false;
+            for (int j = 0; j < entranceCount && j < present.Count && !otherExit; j++)
+                otherExit = j != i && present[j] && Find(j) == Find(i);
+            if (!otherExit) r.problems.Add($"entrance {i} has no other entrance to reach");
+        }
+        return r;
+    }
+}

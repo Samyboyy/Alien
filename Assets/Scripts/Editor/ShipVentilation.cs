@@ -83,9 +83,17 @@ public static partial class ShipBuilder
             var m = Regex.Match(child.name, @"^Vent Entrance (\d+) (\w+)$");
             if (!m.Success) continue;
             int id = int.Parse(m.Groups[1].Value);
-            bool changed = GameObjectUtility.RemoveMonoBehavioursWithMissingScript(child.gameObject) > 0;
+            bool changed = false;
             var e = child.GetComponent<CreatureVentEntrance>();
-            if (e == null) { e = child.gameObject.AddComponent<CreatureVentEntrance>(); changed = true; }
+            if (e == null)
+            {
+                // Only an entrance whose component is gone is touched: replaced by a fresh one that is refilled from its own child points below.
+                Undo.RegisterFullObjectHierarchyUndo(child.gameObject, "Repair vent entrance");
+                GameObjectUtility.RemoveMonoBehavioursWithMissingScript(child.gameObject);
+                e = Undo.AddComponent<CreatureVentEntrance>(child.gameObject);
+                changed = true;
+            }
+            else Undo.RecordObject(e, "Repair vent entrance");
             if (e.id != id) { e.id = id; changed = true; }
             if (e.approach == null) { e.approach = child.Find("Approach"); changed = true; }
             if (e.face == null) { e.face = child.Find("Face"); changed = true; }
@@ -98,12 +106,66 @@ public static partial class ShipBuilder
         entrances.Sort((a, b) => a.id.CompareTo(b.id));
         if (!net.entrances.SequenceEqual(entrances))
         {
+            Undo.RecordObject(net, "Repair vent network");
             net.entrances = entrances.ToArray();
             EditorUtility.SetDirty(net);
             if (repaired == 0) repaired = 1;
         }
         if (repaired > 0) Debug.Log($"Vent entrances: {repaired} repaired (data re-linked from their own child points; the class now has its own script file).");
         return repaired;
+    }
+
+    // ---------- Validation and repair menus ----------
+
+    [MenuItem("Alien/Validate Vent Network")]
+    static void ValidateMenu()
+    {
+        if (!CanRun()) return;
+        Debug.Log(Inspect(out _) ? "Vent network: valid." : "Vent network: problems found (listed above). Run Alien > Validate And Repair Vent Network.");
+    }
+
+    [MenuItem("Alien/Validate And Repair Vent Network")]
+    static void RepairMenu()
+    {
+        if (!CanRun()) return;
+        if (Inspect(out var net) ) { Debug.Log("Vent network: already valid, nothing to repair."); return; }
+        if (!EditorUtility.DisplayDialog("Repair vent network",
+                "Re-link vent entrances whose component is missing (their data is rebuilt from their own child points) and rebuild the network's entrance list. Nothing else in the scene is changed.", "Repair", "Cancel")) return;
+        var scene = EditorSceneManager.GetActiveScene();
+        Undo.IncrementCurrentGroup();
+        int repaired = RepairVentEntrances();
+        if (repaired > 0) EditorSceneManager.MarkSceneDirty(scene);
+        bool valid = Inspect(out net);
+        Debug.Log($"Vent network: {repaired} repaired, {(valid ? "now valid" : "still has problems (listed above): those need manual review")}.");
+        if (repaired == 0) return;
+        if (valid || EditorUtility.DisplayDialog("Save partial repair?", "The network still has problems. Save the repairs that were made?", "Save", "Keep unsaved")) EditorSceneManager.SaveScene(scene);
+    }
+
+    static bool CanRun()
+    {
+        if (EditorApplication.isPlayingOrWillChangePlaymode) { Debug.LogWarning("Vent network tools do not run in Play Mode."); return false; }
+        return true;
+    }
+
+    // Logs every missing script and every structural problem of the open scene's vent network. Changes nothing. True when all is well.
+    static bool Inspect(out CreatureVentNetwork net)
+    {
+        bool ok = true;
+        foreach (var go in Object.FindObjectsByType<Transform>(FindObjectsInactive.Include, FindObjectsSortMode.None).Select(t => t.gameObject))
+        {
+            int missing = GameObjectUtility.GetMonoBehavioursWithMissingScriptCount(go);
+            if (missing == 0) continue;
+            ok = false;
+            var comps = go.GetComponents<Component>();
+            for (int i = 0; i < comps.Length; i++)
+                if (comps[i] == null) Debug.LogError($"Missing script on '{CreatureVentNetwork.PathOf(go.transform)}' (component {i}){(go.transform.parent != null && go.transform.parent.name == VentRoot ? ": a vent node" : "")}.", go);
+        }
+        net = Object.FindFirstObjectByType<CreatureVentNetwork>();
+        if (net == null) { Debug.LogError("No vent network in the open scene."); return false; }
+        var r = net.Validate();
+        foreach (var p in r.problems) Debug.LogError($"Vent network: {p}.", net);
+        Debug.Log($"Vent network: {r.nodes} nodes ({r.entrances} entrances), {r.edges} edges, {r.validEdges} valid, {r.components} connected part(s).");
+        return ok && r.Valid;
     }
 
     // ---------- Room links ----------
@@ -327,6 +389,8 @@ public static partial class ShipBuilder
         var net = Object.FindFirstObjectByType<CreatureVentNetwork>();
         if (net == null) { Debug.Log($"Room links: {links.Count} ({withDoors} with doors), {problems} problems. No ventilation network in the scene yet."); return; }
         net.Build();
+        var structure = net.Validate(); // identities and every edge end, with the reason for each problem
+        foreach (var issue in structure.problems) { problems++; Debug.LogError($"Vent network: {issue}.", net); }
         int junctionCount = 0;
         for (int n = net.EntranceCount; n < net.Graph.NodeCount; n++) if (net.Graph.Degree(n) >= 3) junctionCount++;
         if (junctionCount < 1) { problems++; Debug.LogError("Vent network has no junction."); }

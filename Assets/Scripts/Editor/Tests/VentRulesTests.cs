@@ -167,4 +167,90 @@ public class VentRulesTests
         Assert.AreEqual(0f, VentRules.RemainingSeconds(40f, 50f, 4f));
         Assert.IsTrue(float.IsPositiveInfinity(VentRules.RemainingSeconds(10f, 0f, 0f)));
     }
+
+    // ---------- Network validation ----------
+
+    // The Ship's topology: entrances 0-6, junctions 7 and 8; E0,E1,E4,E3-J0, J0-J1, J1-E5, J1-E6, E2-E1.
+    static readonly (int a, int b)[] ShipEdges = { (0, 7), (1, 7), (4, 7), (3, 7), (7, 8), (8, 5), (8, 6), (2, 1) };
+
+    static List<bool> All(int n, params int[] missing)
+    {
+        var l = new List<bool>();
+        for (int i = 0; i < n; i++) l.Add(System.Array.IndexOf(missing, i) < 0);
+        return l;
+    }
+
+    static List<(int, int)> Edges(params (int, int)[] e) => new(e);
+
+    [Test]
+    public void TheShipsNetworkIsValid()
+    {
+        var r = VentValidation.Check(All(9), 7, ShipEdges, new[] { 0, 1, 2, 3, 4, 5, 6 });
+        Assert.IsTrue(r.Valid, string.Join("; ", r.problems));
+        Assert.AreEqual((9, 8, 8, 1), (r.nodes, r.edges, r.validEdges, r.components));
+    }
+
+    [Test]
+    public void LostEntrancesRejectExactlyTheEdgesThatUseThem()
+    {
+        // The real fault: the seven entrance components could not be loaded, so every edge that ends at one was rejected. Only J0-J1 survives.
+        var edges = new List<(int, int)>();
+        foreach (var (a, b) in ShipEdges) edges.Add((a < 7 ? -1 : a, b < 7 ? -1 : b));
+        var r = VentValidation.Check(All(9, 0, 1, 2, 3, 4, 5, 6), 7, edges);
+        Assert.AreEqual(1, r.validEdges);
+        for (int k = 0; k < 8; k++) Assert.AreEqual(k != 4, r.problems.Exists(p => p.StartsWith($"edge {k}:")), $"edge {k}");
+    }
+
+    [Test]
+    public void MissingStartMissingEndAndUnregisteredEndsAreReportedPerEdge()
+    {
+        var r = VentValidation.Check(All(4), 2, Edges((-1, 2), (2, -1), (0, 2), (3, 2)));
+        Assert.IsTrue(r.problems.Exists(p => p.StartsWith("edge 0:") && p.Contains("start")));
+        Assert.IsTrue(r.problems.Exists(p => p.StartsWith("edge 1:") && p.Contains("end")));
+        Assert.IsFalse(r.problems.Exists(p => p.StartsWith("edge 2:")));
+    }
+
+    [Test]
+    public void DuplicateAndSelfEdgesAndDuplicateIdsAreFound()
+    {
+        var r = VentValidation.Check(All(3), 2, Edges((0, 2), (2, 0), (1, 1), (1, 2)), new[] { 0, 0 });
+        Assert.IsTrue(r.problems.Exists(p => p.StartsWith("edge 1:") && p.Contains("duplicates")), "a duct is travelled both ways: B-A repeats A-B");
+        Assert.IsTrue(r.problems.Exists(p => p.StartsWith("edge 2:") && p.Contains("starts and ends")));
+        Assert.IsTrue(r.problems.Exists(p => p.Contains("id 0 is used more than once")));
+        Assert.AreEqual(2, r.validEdges);
+    }
+
+    [Test]
+    public void IsolatedEntrancesAndSplitNetworksAreFound()
+    {
+        var isolated = VentValidation.Check(All(3), 2, Edges((0, 2)));
+        Assert.IsTrue(isolated.problems.Exists(p => p.Contains("entrance 1 has no duct")));
+        var split = VentValidation.Check(All(6), 4, Edges((0, 4), (1, 4), (2, 5), (3, 5)));
+        Assert.AreEqual(2, split.components);
+        Assert.IsTrue(split.problems.Exists(p => p.Contains("2 separate parts")));
+        var lonely = VentValidation.Check(All(4), 3, Edges((0, 3), (1, 2)));
+        Assert.IsTrue(lonely.problems.Exists(p => p.Contains("entrance 0 has no other entrance")), "its only neighbour is a dead-end junction");
+    }
+
+    [Test]
+    public void ValidationIsDeterministicAndChangesNothing()
+    {
+        var present = All(9, 3);
+        var edges = new List<(int, int)>(ShipEdges);
+        var a = VentValidation.Check(present, 7, edges);
+        var b = VentValidation.Check(present, 7, edges);
+        CollectionAssert.AreEqual(a.problems, b.problems);
+        Assert.AreEqual(9, present.Count);
+        CollectionAssert.AreEqual(ShipEdges, edges);
+        // The runtime graph is untouched by anything a round does: routes between the same nodes stay the same.
+        var g = new VentGraph(9);
+        foreach (var (x, y) in ShipEdges) g.AddEdge(x, y, 10f);
+        var first = new List<int>();
+        Assert.IsTrue(g.Route(0, 6, first, null, out float len1));
+        var again = new List<int>();
+        Assert.IsTrue(g.Route(0, 6, again, null, out float len2));
+        CollectionAssert.AreEqual(first, again);
+        Assert.AreEqual(len1, len2);
+        Assert.AreEqual(8, g.EdgeCount);
+    }
 }

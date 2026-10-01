@@ -9830,7 +9830,7 @@ MonoBehaviour:
   m_GameObject: {fileID: 376891385}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 718065291}
+  m_Script: {fileID: 11500000, guid: 67df4989ed9f8244382e5317a16b75f0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::CreatureVentEntrance
   id: 1
@@ -18382,21 +18382,6 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 712185631}
   m_Mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
---- !u!115 &718065291
-MonoScript:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_Name: 
-  serializedVersion: 7
-  m_DefaultReferences: {}
-  m_Icon: {fileID: 0}
-  m_Type: 0
-  m_ExecutionOrder: 0
-  m_ClassName: CreatureVentEntrance
-  m_Namespace: 
-  m_AssemblyName: Assembly-CSharp
 --- !u!1 &720606295
 GameObject:
   m_ObjectHideFlags: 0
@@ -22323,7 +22308,7 @@ MonoBehaviour:
   m_GameObject: {fileID: 873365181}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 718065291}
+  m_Script: {fileID: 11500000, guid: 67df4989ed9f8244382e5317a16b75f0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::CreatureVentEntrance
   id: 0
@@ -33286,7 +33271,7 @@ MonoBehaviour:
   m_GameObject: {fileID: 1248077383}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 718065291}
+  m_Script: {fileID: 11500000, guid: 67df4989ed9f8244382e5317a16b75f0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::CreatureVentEntrance
   id: 4
@@ -36775,7 +36760,7 @@ MonoBehaviour:
   m_GameObject: {fileID: 1358950898}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 718065291}
+  m_Script: {fileID: 11500000, guid: 67df4989ed9f8244382e5317a16b75f0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::CreatureVentEntrance
   id: 5
@@ -38138,7 +38123,7 @@ MonoBehaviour:
   m_GameObject: {fileID: 1388625161}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 718065291}
+  m_Script: {fileID: 11500000, guid: 67df4989ed9f8244382e5317a16b75f0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::CreatureVentEntrance
   id: 2
@@ -50280,7 +50265,7 @@ MonoBehaviour:
   m_GameObject: {fileID: 1741817833}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 718065291}
+  m_Script: {fileID: 11500000, guid: 67df4989ed9f8244382e5317a16b75f0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::CreatureVentEntrance
   id: 6
@@ -58149,7 +58134,7 @@ MonoBehaviour:
   m_GameObject: {fileID: 2038783322}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 718065291}
+  m_Script: {fileID: 11500000, guid: 67df4989ed9f8244382e5317a16b75f0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::CreatureVentEntrance
   id: 3

@@ -60,11 +60,13 @@ public class CreatureVentNetwork : MonoBehaviour
             nodePos[entrances.Length + j] = junctions[j].position;
         }
         Graph = new VentGraph(n);
-        foreach (var edge in edges)
+        for (int k = 0; k < edges.Length; k++)
         {
-            if (edge == null || edge.from == null || edge.to == null || !nodeOf.TryGetValue(edge.from, out int a) || !nodeOf.TryGetValue(edge.to, out int b))
+            var edge = edges[k];
+            int a = -1, b = -1;
+            if (edge == null || (a = NodeIndex(edge.from)) < 0 || (b = NodeIndex(edge.to)) < 0)
             {
-                Debug.LogWarning("Vent network: an edge has a missing or unknown end and is ignored.", this);
+                Debug.LogWarning($"Vent network: edge {k} is ignored. Start: {Why(edge?.from, a)}. End: {Why(edge?.to, b)}.", this);
                 continue;
             }
             var line = new List<Vector3> { nodePos[a] };
@@ -73,6 +75,49 @@ public class CreatureVentNetwork : MonoBehaviour
             Graph.AddEdge(a, b, Length(line));
             polylines.Add(line);
         }
+    }
+
+    int NodeIndex(Transform t) => t != null && nodeOf.TryGetValue(t, out int i) ? i : -1;
+
+    // Why an end of an edge was not accepted, for the warning: the missing reference or the object that is not a registered node.
+    string Why(Transform t, int index)
+    {
+        if (index >= 0) return $"node {index} ok";
+        if (t == null) return "no object assigned";
+        return $"'{PathOf(t)}' is not a registered node (an entrance's Top point whose entrance component is missing, or a transform not listed in entrances or junctions)";
+    }
+
+    public static string PathOf(Transform t)
+    {
+        string path = t.name;
+        for (var p = t.parent; p != null; p = p.parent) path = p.name + "/" + path;
+        return path;
+    }
+
+    /// <summary>Checks the authored network without building or changing anything (editor tools and tests).</summary>
+    public VentValidation.Report Validate()
+    {
+        var map = new Dictionary<Transform, int>();
+        var present = new List<bool>();
+        var ids = new List<int>();
+        for (int i = 0; i < entrances.Length; i++)
+        {
+            var e = entrances[i];
+            bool ok = e != null && e.top != null;
+            present.Add(ok);
+            ids.Add(e != null ? e.id : -1);
+            if (ok) map[e.top] = i;
+        }
+        for (int j = 0; j < junctions.Length; j++)
+        {
+            present.Add(junctions[j] != null);
+            if (junctions[j] != null) map[junctions[j]] = entrances.Length + j;
+        }
+        var pairs = new List<(int, int)>();
+        foreach (var edge in edges)
+            pairs.Add((edge != null && edge.from != null && map.TryGetValue(edge.from, out int a) ? a : -1,
+                edge != null && edge.to != null && map.TryGetValue(edge.to, out int b) ? b : -1));
+        return VentValidation.Check(present, entrances.Length, pairs, ids);
     }
 
     public bool IsJunction(int node) => node >= entrances.Length;

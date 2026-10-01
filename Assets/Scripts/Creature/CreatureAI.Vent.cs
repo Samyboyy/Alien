@@ -3,8 +3,6 @@ using Unity.Netcode;
 using UnityEngine;
 using UnityEngine.AI;
 
-public enum VentPhase : byte { None, Approaching, Entering, Travelling, Preparing, Exiting }
-
 /// <summary>
 /// Creature-only ventilation (host only decisions). The creature uses vents to REPOSITION towards what it knows: its own evidence
 /// (last confirmed sighting, accepted sounds), its search memory, and on hunting patrol a stale or recently active room. It never
@@ -76,13 +74,27 @@ public partial class CreatureAI
     [Tooltip("Wait this long for a blocked or watched exit before trying another")] public float emergeWaitMax = 5f;
     [Tooltip("After this long it emerges anyway, as long as the spot is physically clear")] public float emergeGiveUp = 25f;
 
-    enum HearMode : byte { Act, Pending }
+    [Header("Vent interruption (evidence before and during a trip)")]
+    [Tooltip("After a trip is cancelled for evidence it will not start another for this long (s). Chasing and searching are unaffected.")] public float ventRetryCooldown = 6f;
+    [Tooltip("A trip in the duct may change its exit at most this many times")] public int ventMaxReroutes = 2;
+    [Tooltip("Penalty (s) for coming out where it went in, so a re-route is never a pointless return")] public float ventReturnPenalty = 8f;
+    [Tooltip("Before it commits: a player sprinting within this distance cancels the trip (m)")] public float ventCancelSprintDistance = 16f;
+    [Tooltip("...walking footsteps while it is hunting, within this distance (m)")] public float ventCancelWalkDistance = 8f;
+    [Tooltip("...heavy breathing within this distance (m)")] public float ventCancelBreathDistance = 4f;
+    [Tooltip("...a player-made impact at least this strong (0..1)")] [Range(0f, 1f)] public float ventCancelImpactStrength = 0.5f;
+    [Tooltip("...a noisemaker at least this strong, when no player evidence is held (0..1)")] [Range(0f, 1f)] public float ventDecoyCancelStrength = 0.6f;
+    [Tooltip("Evidence weaker than this is ignored by the vent logic (0..1)")] [Range(0f, 1f)] public float ventMinStoreStrength = 0.15f;
+    [Tooltip("A sound must be at least this strong to cancel a trip (0..1)")] [Range(0f, 1f)] public float ventMinCancelStrength = 0.25f;
+
+    enum HearMode : byte { Act, Pending, PreVent }
 
     struct HeardSound
     {
         public Vector3 position;
         public float strength;
         public ulong emitter;
+        public ulong token; // a decoy's identity, 0 for any other sound
+        public SoundKind kind;
     }
 
     readonly NetworkVariable<VentPhase> ventPhase = new(VentPhase.None);
@@ -98,8 +110,26 @@ public partial class CreatureAI
     // Every phase change goes through here: the start time is written with it (only on a change, never per frame).
     void SetVentPhase(VentPhase phase)
     {
+        attempt.SetPhase(phase);
         ventPhaseStart.Value = NetworkManager.ServerTime.Time;
         ventPhase.Value = phase;
+    }
+
+    // The trip's state machine (pure): what may happen to it, and when. The fields below remain the working data of the trip.
+    readonly VentAttempt attempt = new();
+    bool ventReconsidered;
+    string ventCancelNote = "-", ventRerouteNote = "-", ventPostNote = "-";
+
+    VentEvidenceTuning VentTuning => new()
+    {
+        cancelSprintDistance = ventCancelSprintDistance, cancelWalkDistance = ventCancelWalkDistance, cancelBreathDistance = ventCancelBreathDistance,
+        cancelImpactStrength = ventCancelImpactStrength, decoyCancelStrength = ventDecoyCancelStrength, minStoreStrength = ventMinStoreStrength,
+        minCancelStrength = ventMinCancelStrength, maxAgeSeconds = soundStaleSeconds,
+    };
+
+    void VentLog(string text)
+    {
+        if (showDebugLabel) Debug.Log(text); // developer debugging only, and only on a change
     }
 
     Renderer[] ventRenderers;
@@ -238,6 +268,11 @@ public partial class CreatureAI
             ventVerdict = sight ? "a player is in sight" : state.Value == CreatureState.Chase ? "chasing" : $"minimum interval ({lastVentEnd + ventCooldown - now:0}s)";
             return false;
         }
+        if (!attempt.MayBegin(now))
+        {
+            ventVerdict = $"retry cooldown after a cancelled trip ({Mathf.Max(0f, (float)(attempt.RetryUntil - now)):0.0}s)"; // evidence cancelled the last attempt; chasing and searching go on
+            return false;
+        }
 
         float frustration = resume == CreatureState.Patrol ? Frustration() : 0f;
         float desire = VentDesire();
@@ -328,6 +363,9 @@ public partial class CreatureAI
 
     void BeginVent(int entry, int exit, string why, CreatureState resume, string evidenceNote)
     {
+        attempt.Begin(entry, exit, Time.timeAsDouble);
+        ventReconsidered = false;
+        ventRerouteNote = ventCancelNote = ventPostNote = "-";
         ventEntry = entry;
         ventExit = exit;
         ventEntryNet.Value = (sbyte)entry;
@@ -355,14 +393,33 @@ public partial class CreatureAI
         Debug.Log($"Creature vent: {why}; entrance {entry} to exit {exit}, about {ventPlanSeconds:0.0}s against {ventGroundSeconds:0.0}s on foot. Evidence: {evidenceNote}");
     }
 
-    // Before it has committed (agent still on, collider still on): simply stop.
+    // Before it has committed (agent still on, collider still on): simply stop. The attempt starts its retry cooldown and never counts as a trip.
     void CancelVent(string why)
     {
+        attempt.Cancel(Time.timeAsDouble, ventRetryCooldown);
         SetVentPhase(VentPhase.None);
         ventEntryNet.Value = ventExitNet.Value = -1;
         ventCommitted = false;
         ventPending.Clear();
         reason = $"vent cancelled: {why}";
+    }
+
+    /// <summary>
+    /// THE way a vent attempt is given up for evidence, only before the commit point. Stops the walk to the mouth and the wind-up, drops the
+    /// entrance and exit (nothing was recorded as used), resets the replicated phase and ids (every peer stops the entry cue and shows the
+    /// creature as it is: visible, on the NavMesh, agent on), starts the retry cooldown, and leaves the evidence that caused it to the caller,
+    /// which moves straight on to chase, pursue, investigate or search. A callback that arrives later cannot restart the trip (VentAttempt).
+    /// </summary>
+    bool CancelVentAttemptForEvidence(string why)
+    {
+        if (state.Value != CreatureState.Vent || ventCommitted || !attempt.Interruptible) return false;
+        if (agent.enabled && agent.isOnNavMesh) { agent.ResetPath(); agent.velocity = Vector3.zero; }
+        ventTimer = ventWait = 0f;
+        CancelVent(why);
+        ventCancelNote = why;
+        ventVerdict = $"cancelled before commit: {why}";
+        VentLog($"Vent cancelled before commit: {why}");
+        return true;
     }
 
     // The vent could not be used and nothing else took over: carry on as before.
@@ -383,6 +440,9 @@ public partial class CreatureAI
     void ResetVent(Vector3 startPosition, int seed)
     {
         bool wasCommitted = ventCommitted || !agent.enabled;
+        attempt.Reset(); // including the retry cooldown
+        ventReconsidered = false;
+        ventRerouteNote = ventCancelNote = ventPostNote = "-";
         SetVentPhase(VentPhase.None);
         ventEntryNet.Value = ventExitNet.Value = -1;
         ventCommitted = false;
@@ -420,17 +480,21 @@ public partial class CreatureAI
         var phase = ventPhase.Value;
         float dt = Time.deltaTime;
 
-        // While it has not committed, fresh sight interrupts (Acquire cancels the vent and starts the chase).
+        // Before the commit point the trip is only a plan: sight and important evidence cancel it (VentEvidenceRules decides what is important).
         bool interruptible = phase == VentPhase.Approaching || (phase == VentPhase.Entering && !ventCommitted);
         if (interruptible && (ventTick -= dt) <= 0f)
         {
             ventTick = 0.1f;
             UpdateSight();
             if (Acquire()) return;
+            if (state.Value != CreatureState.Vent) return; // the sight code may already have moved on (a watched hiding-place entry)
+            if (Hear(HearMode.PreVent)) return;
+            if (state.Value != CreatureState.Vent) return;
         }
 
-        // In the duct: listen (never look), and keep the best new sound for the next junction.
-        if (phase == VentPhase.Travelling && (ventHearTimer -= dt) <= 0f)
+        // Committed (in the duct, in the pre-exit wait, coming out): listen, never look, and keep the best new evidence for the next decision.
+        bool committedPhase = phase is VentPhase.Travelling or VentPhase.Preparing or VentPhase.Exiting || (phase == VentPhase.Entering && ventCommitted);
+        if (committedPhase && (ventHearTimer -= dt) <= 0f)
         {
             ventHearTimer = ventHearInterval;
             Hear(HearMode.Pending);
@@ -447,20 +511,76 @@ public partial class CreatureAI
         }
     }
 
-    // Called by Hear in Pending mode: the best accepted sound is held, not acted on, until a junction.
-    void OfferPendingSound(Vector3 position, float strength, ulong emitter, bool pursued, double now)
+    // What a heard sound is, for the vent rule: from its kind, who made it (a player or not) and whether it is the trail being pursued.
+    VentEvidenceKind VentKindOf(in NoiseSystem.Noise n, bool pursued)
     {
-        var sound = new HeardSound { position = position, strength = strength, emitter = emitter };
+        if (n.token != 0) return VentEvidenceKind.Decoy;
+        if (pursued) return VentEvidenceKind.PursuedTrail;
+        bool fromPlayer = n.emitter != NoiseSystem.NoEmitter && n.emitter != NoiseSystem.CreatureEmitter;
+        return n.kind switch
+        {
+            SoundKind.SprintStep => VentEvidenceKind.PlayerSprint,
+            SoundKind.WalkStep or SoundKind.CrouchStep or SoundKind.Tracker => VentEvidenceKind.PlayerWalk,
+            SoundKind.Breathing => VentEvidenceKind.PlayerBreath,
+            SoundKind.HeavyBreathing => VentEvidenceKind.PlayerHeavyBreath,
+            SoundKind.Impact when fromPlayer => VentEvidenceKind.PlayerImpact,
+            _ => VentEvidenceKind.Incidental,
+        };
+    }
+
+    VentEvidenceAction VentActionFor(in NoiseSystem.Noise n, float strength, float distance, double now, bool pursued, bool trail, float currentScore)
+    {
+        bool hunting = evidenceKind != EvidenceKind.None || alertness >= heightenedAlertness; // already hunting something
+        bool playerHeld = trail && currentScore > 0f; // a still-weighted player trail is held
+        return VentEvidenceRules.Decide(attempt.Commitment, VentKindOf(n, pursued), strength, (float)(now - n.time), distance, hunting, playerHeld, VentTuning);
+    }
+
+    string VentKindText(in NoiseSystem.Noise n, bool pursued) => VentKindOf(n, pursued) switch
+    {
+        VentEvidenceKind.PlayerSprint => "sprint",
+        VentEvidenceKind.PlayerWalk => "footstep",
+        VentEvidenceKind.PlayerHeavyBreath => "heavy breathing",
+        VentEvidenceKind.PlayerImpact => "impact",
+        VentEvidenceKind.PursuedTrail => "player trail",
+        VentEvidenceKind.Decoy => "decoy",
+        _ => "sound",
+    };
+
+    // Called by Hear in Pending mode: the best accepted sound is held, not acted on, until a junction.
+    void OfferPendingSound(Vector3 position, float strength, ulong emitter, bool pursued, double now, ulong token = 0, SoundKind kind = SoundKind.Other)
+    {
+        var sound = new HeardSound { position = position, strength = strength, emitter = emitter, token = token, kind = kind };
         if (ventPending.Offer(sound, strength + (pursued ? 2f : 0f), now, now, ventPendingMaxAge))
-            ventVerdict = $"heard something in the duct ({strength:0.00}), held for the next junction";
+        {
+            ventVerdict = $"stored {kind} ({strength:0.00}) for the next decision";
+            VentLog($"Vent evidence stored for the next decision: {kind} {strength:0.00}");
+        }
     }
 
     // A held sound becomes ordinary evidence (and room heat) when the creature reaches a junction or the end of the route.
     bool AdoptPendingSound()
     {
-        if (!ventPending.TryTake(Time.timeAsDouble, ventPendingMaxAge, out var sound)) return false;
-        lastSwitchTime = Time.timeAsDouble;
+        double now = Time.timeAsDouble;
+        if (!ventPending.TryTake(now, ventPendingMaxAge, out var sound)) return false; // expired evidence reroutes nothing
+        // A player who died, escaped or disconnected is no evidence; nor is a decoy that is gone or already recognised.
+        bool fromPlayer = sound.emitter != NoiseSystem.NoEmitter && sound.emitter != NoiseSystem.CreatureEmitter;
+        bool inPlay = fromPlayer && PlayerById(sound.emitter, out var who) && Alive(who);
+        if (!VentEvidenceRules.Usable(fromPlayer, inPlay)) { ventVerdict = "held evidence dropped: that player is no longer in play"; return false; }
+        if (sound.token != 0 && (decoys.IsIgnored(sound.token) || !ThrownNoisemaker.IsLive(sound.token))) { ventVerdict = "held evidence dropped: the decoy is gone"; return false; }
+        // It must still beat what the creature already follows, by the same rules as any heard sound (a fresh player trail outranks a decoy).
+        float cur = evidenceKind == EvidenceKind.None ? 0f : EscapeRules.EvidenceScore(evidenceStrength, (float)(now - evidenceTime), evidenceFadeSeconds);
+        bool trail = evidenceKind != EvidenceKind.None && evidenceEmitter != NoiseSystem.NoEmitter;
+        bool ok = sound.token != 0
+            ? DecoyRules.Accept(false, decoys.InterestLeft(now), cur, trail, sound.token == evidenceToken, sound.strength, switchMargin, true)
+            : EscapeRules.AcceptNoise(cur, trail, trail && fromPlayer && sound.emitter == evidenceEmitter, !fromPlayer, sound.strength, switchMargin, true);
+        if (!ok) { ventVerdict = "held evidence did not beat the current evidence"; return false; }
+        lastSwitchTime = now;
+        var before = sound.token != 0 ? Snapshot() : default;
+        bool followingDecoy = evidenceToken != 0;
         SetEvidence(EvidenceKind.Noise, sound.position, sound.strength, sound.emitter);
+        if (sound.token != 0) BeginDecoy(sound.token, before, followingDecoy);
+        if (fromPlayer) ventResume = CreatureState.Pursue; // it goes after a player's trail when it comes out
+        else if (ventResume == CreatureState.Patrol) ventResume = CreatureState.Investigate;
         return true;
     }
 
@@ -496,6 +616,7 @@ public partial class CreatureAI
     // The point of no return: the agent and collider go off and the creature walks into the wall at ventSpeed.
     void CommitVent()
     {
+        if (state.Value != CreatureState.Vent || ventPhase.Value != VentPhase.Entering || ventCommitted || ventEntry < 0) return; // a stale call after a cancel does nothing
         var net = VentNet;
         var entrance = net.entrances[ventEntry];
         var exit = net.entrances[ventExit];
@@ -504,6 +625,7 @@ public partial class CreatureAI
             AbandonVent("no duct route");
             return;
         }
+        if (!attempt.Commit()) return;
         ventPoints.Clear();
         ventPoints.Add(transform.position);
         ventPoints.Add(entrance.face.position);
@@ -572,6 +694,7 @@ public partial class CreatureAI
         {
             if (AdoptPendingSound()) ventEvidenceNote = EvidenceNote(); // heard on the last stretch: it heads there after emerging
             ventTimer = ventWait = 0f;
+            ventReconsidered = false;
             SetVentPhase(VentPhase.Preparing); // the warning plays at the exit from the phase change, on every peer
         }
     }
@@ -584,22 +707,37 @@ public partial class CreatureAI
         var net = VentNet;
         int n = net.EntranceCount;
         EnsureVentBuffers(n);
+        return TryRerouteFrom(node, "heard evidence in the duct");
+    }
+
+    // The re-routing decision, from a node the creature is physically at: the best exit for the evidence it holds now, by the graph route plus the
+    // ground walk plus the emergence-fairness penalty, with a penalty for coming out where it went in. Changes the exit only when materially
+    // better, and at most ventMaxReroutes times per trip (so two mouths cannot loop it). Reads nothing but the stored evidence position.
+    bool TryRerouteFrom(int node, string why)
+    {
+        if (attempt.Reroutes >= ventMaxReroutes) return false;
+        var net = VentNet;
+        int n = net.EntranceCount;
+        EnsureVentBuffers(n);
         for (int j = 0; j < n; j++)
         {
             var e = net.entrances[j];
             bool ok = e != null && e.usable && e.approach != null;
             ventExitM[j] = ok ? PathMetres(e.approach.position, evidencePos, false) : -1f;
-            ventExitPen[j] = ok ? ExitPenalty(e, evidencePos, true) : 0f;
+            ventExitPen[j] = ok ? ExitPenalty(e, evidencePos, true) + (j == ventEntry ? ventReturnPenalty : 0f) : 0f;
         }
         float walk = ResumeSpeed(ventResume);
         int best = VentRules.BestExitFrom(net.Graph, node, ventExitM, ventExitPen, walk, ventSpeed, null);
         ventEvidenceNote = EvidenceNote();
         if (best < 0 || best == ventExit) return false;
-        float Score(int j) => net.Graph.Distance(node, j) / ventSpeed + ventExitM[j] / walk + ventExitPen[j];
-        float current = ventExit >= 0 && ventExitM[ventExit] >= 0f ? Score(ventExit) : float.PositiveInfinity;
+        float Score(int j) => (node == j ? 0f : net.Graph.Distance(node, j)) / ventSpeed + ventExitM[j] / walk + ventExitPen[j];
+        float current = ventExit >= 0 && ventExitM[ventExit] >= 0f && !float.IsPositiveInfinity(ventExitPen[ventExit]) ? Score(ventExit) : float.PositiveInfinity;
         if (Score(best) + ventReplanGain >= current) return false;
-        if (!SwitchExit(node, best)) return false;
-        ventReason += " (re-planned at a junction)";
+        int previous = ventExit;
+        if (!attempt.Reroute(best, ventMaxReroutes) || !SwitchExit(node, best)) return false;
+        ventReason += " (re-routed)";
+        ventRerouteNote = $"Exit {previous} -> Exit {best}, {why}";
+        VentLog($"Vent route changed: Exit {previous} -> Exit {best}, {why}");
         return true;
     }
 
@@ -636,6 +774,13 @@ public partial class CreatureAI
         ventTimer += dt;
         ventWait += dt;
         if (ventTimer < ventWarning) return; // the warning period
+
+        // The last legitimate decision before it commits to coming out: evidence held since the trip began may point to a better exit.
+        if (!ventReconsidered)
+        {
+            ventReconsidered = true;
+            if (AdoptPendingSound() && TryRerouteFrom(ventExit, "evidence before emerging")) return; // back in the duct towards the new exit
+        }
 
         var exit = VentNet.entrances[ventExit];
         bool blocked = ExitObstructed(exit);
@@ -693,6 +838,8 @@ public partial class CreatureAI
         agent.Warp(p);
         if (ventCollider != null) ventCollider.enabled = true;
         ventCommitted = false;
+        AdoptPendingSound(); // evidence held while it came out: acted on at once, from the ground
+        attempt.Finish();
         SetVentPhase(VentPhase.None);
         ventEntryNet.Value = ventExitNet.Value = -1;
         ventPending.Clear();
@@ -710,7 +857,15 @@ public partial class CreatureAI
     // Back on the ground: head for the remembered evidence, or search the room it came out in. It knows nothing new.
     void AfterVent()
     {
-        if (evidenceKind != EvidenceKind.None) { EnterSearch(ResumeAfterVent(), "emerged from a vent, heading for the evidence"); return; }
+        if (evidenceKind != EvidenceKind.None)
+        {
+            ventPostNote = $"went for the evidence ({EvidenceNote()})";
+            VentLog($"Vent emerged: {ventPostNote}");
+            EnterSearch(ResumeAfterVent(), "emerged from a vent, heading for the evidence");
+            return;
+        }
+        ventPostNote = "no evidence left: a heightened search of the room it came out in";
+        alertness = Mathf.Max(alertness, 0.5f); // never an instant return to calm
         state.Value = CreatureState.Search;
         reason = "emerged from a vent, searching this room";
         evidencePos = transform.position; // no evidence: the search is centred on where it came out
@@ -730,11 +885,11 @@ public partial class CreatureAI
         string cadence = $"desire {VentDesire():0.00} (interval {VentInterval():0}s{(ventFirstOfRound ? ", first trip" : "")}, alert {VentAlert():0.00}), {gate}, frustration {Frustration():0.00}, trips {ventTrips}";
         var phase = ventPhase.Value;
         if (phase == VentPhase.None)
-            return $"idle, {cadence}\n  last: {ventReason}\n  last decision: {ventVerdict}\n  evidence used: {ventEvidenceNote}";
+            return $"idle, {cadence}, retry cooldown {Mathf.Max(0f, (float)(attempt.RetryUntil - Time.timeAsDouble)):0.0}s, cancelled {attempt.Cancelled}\n  last: {ventReason}\n  last decision: {ventVerdict}\n  evidence used: {ventEvidenceNote}\n  cancelled: {ventCancelNote}; re-routed: {ventRerouteNote}; after: {ventPostNote}";
         string route = ventCommitted ? $"{ventTravelled:0.0}/{ventLength:0.0} m, {VentRules.RemainingSeconds(ventLength, ventTravelled, ventSpeed):0.0}s left" : "not committed";
         string en = ventEntry >= 0 ? $"#{ventEntry}" : "-", ex = ventExit >= 0 ? $"#{ventExit}" : "-";
-        string held = ventPending.Has ? $", holding a sound ({Time.timeAsDouble - ventPending.Time:0.0}s old)" : "";
-        return $"{phase} entry {en} exit {ex}, {route}{held}\n  {cadence}\n  why: {ventReason}\n  evidence used: {ventEvidenceNote}";
+        string held = ventPending.Has ? $", holding {ventPending.Value.kind} {ventPending.Value.strength:0.00} ({Time.timeAsDouble - ventPending.Time:0.0}s old)" : "";
+        return $"{phase} entry {en} exit {ex}, {route}{held}\n  commitment {attempt.Commitment}, {(attempt.Interruptible ? "INTERRUPTIBLE" : "committed")}, reroutes {attempt.Reroutes}/{ventMaxReroutes}\n  {cadence}\n  why: {ventReason}\n  evidence used: {ventEvidenceNote}\n  cancelled: {ventCancelNote}; re-routed: {ventRerouteNote}; after: {ventPostNote}";
     }
 
     void DrawVentGizmos()

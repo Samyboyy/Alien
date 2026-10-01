@@ -148,6 +148,20 @@ public class AudioBank : ScriptableObject
     public float trackerRemoteFullDistance = 2f;
     public float trackerRemoteMaxDistance = 18f;
 
+    [Header("Throwable noisemaker (all optional; see ThrownNoisemaker)")]
+    [Tooltip("Picking one up. Empty: silent.")] public AudioClip noisemakerPickup;
+    [Tooltip("Throwing it (the handling). Empty: silent.")] public AudioClip noisemakerThrow;
+    [Tooltip("Hitting something. Empty: a short piece of a metal footstep, pitched down, stands in (temporary).")] public AudioClip noisemakerImpact;
+    [Tooltip("One electronic pulse. Empty: a short generated chirp stands in (temporary).")] public AudioClip noisemakerPulse;
+    [Tooltip("Shutting down. Empty: the generated chirp, lower and softer.")] public AudioClip noisemakerSpent;
+    [Range(0f, 1f)] public float noisemakerPickupVolume = 0.6f;
+    [Range(0f, 1f)] public float noisemakerThrowVolume = 0.5f;
+    [Range(0f, 1f)] public float noisemakerImpactVolume = 0.8f;
+    [Range(0f, 1f)] public float noisemakerPulseVolume = 0.7f;
+    [Range(0f, 1f)] public float noisemakerSpentVolume = 0.5f;
+    [Tooltip("Pulses are at full volume inside this distance (m)...")] public float noisemakerFullDistance = 3f;
+    [Tooltip("...and silent by this distance (m). Audible playback only: how far the CREATURE hears a pulse is the device's pulseRange. Was 30; 40 lets the pulse carry a little better at long range and changes nothing close up.")] public float noisemakerMaxDistance = 40f;
+
     [Header("Ship acoustics (the listener's space; see ShipAcoustics)")]
     public AcousticProfile[] acousticProfiles = AcousticProfile.Defaults();
     [Tooltip("Used on the ship outside every acoustic zone (the corridors have zones too; this covers the odd doorway cell)")] public AcousticSpace fallbackSpace = AcousticSpace.Corridor;
@@ -338,6 +352,8 @@ public sealed class SfxPool
     /// <summary>Set by EmitterAcoustics.Attach: told just before a sound starts, so its reflections are right from the first moment.</summary>
     public EmitterAcoustics Acoustics { get; set; }
     public AudioCategory Category => category;
+    /// <summary>The source the most recent sound was started on (diagnostics: is it really playing, at what volume).</summary>
+    public AudioSource LastSource { get; private set; }
 
     public SfxPool(GameObject host, int size, AudioCategory category, float spatialBlend, float maxDistance,
         AudioRolloffMode rolloff = AudioRolloffMode.Logarithmic, float minDistance = 1.5f, AnimationCurve customRolloff = null)
@@ -392,6 +408,7 @@ public sealed class SfxPool
         s.volume = midClip ? 0f : AcousticRules.Compose(clipVolume[i], categoryVolume[i], gain); // a piece from the middle fades in (Tick)
         s.time = Mathf.Min(start, Mathf.Max(0f, clip.length - 0.05f));
         s.Play();
+        LastSource = s;
         float p = Mathf.Abs(pitch) < 0.01f ? 1f : Mathf.Abs(pitch);
         endTime[i] = length > 0f ? Time.timeAsDouble + length / p : 0;
         fadeInFrom[i] = midClip ? Time.timeAsDouble : double.NegativeInfinity;

@@ -30,7 +30,17 @@ public class FootstepNoise : NetworkBehaviour, IRoundResettable
     [Tooltip("Vertical m/s above which the player counts as airborne (no footsteps)")] public float maxGroundedVerticalSpeed = 3f;
     [Tooltip("Speed is averaged over this window")] public float sampleInterval = 0.2f;
 
+    [Header("Hidden in a locker (m)")]
+    [Tooltip("Breathing range while hidden: extremely quiet")] public float hiddenBreathRange = 0.5f;
+    [Tooltip("...a little more when the creature is close (fear)")] public float hiddenFearBreathRange = 1.2f;
+    [Tooltip("The creature counts as close for the fear effect inside this distance")] public float fearDistance = 6f;
+
     NetworkFirstPersonController controller;
+    PlayerHiding hiding;
+
+    /// <summary>Diagnostics: the outer range of the last breathing noise made (0 = none: the breath is held), and when.</summary>
+    public float LastBreathRange { get; private set; }
+    public double LastBreathAt { get; private set; }
     PlayerLife life;
     Vector3 lastPos;
     float sinceSample, sampleDist, sampleVert, speed, verticalSpeed, stride, heavy, breathTimer;
@@ -38,6 +48,7 @@ public class FootstepNoise : NetworkBehaviour, IRoundResettable
     void Awake()
     {
         controller = GetComponent<NetworkFirstPersonController>();
+        hiding = GetComponent<PlayerHiding>();
         life = GetComponent<PlayerLife>();
     }
 
@@ -59,6 +70,14 @@ public class FootstepNoise : NetworkBehaviour, IRoundResettable
         if (life != null && !life.IsAlive) { stride = heavy = speed = 0f; return; } // dead or escaped: silent
 
         float dt = Time.deltaTime;
+        if (hiding != null && hiding.SuppressFootsteps)
+        {
+            // In a locker (or just snapped in or out): no footsteps, and the teleport is not walking. Breathing still follows its rules below.
+            stride = speed = sampleDist = sampleVert = sinceSample = 0f;
+            heavy = Mathf.Max(0f, heavy - dt / Mathf.Max(0.01f, breathRecoverSeconds));
+            EmitBreathing(dt);
+            return;
+        }
         Vector3 flat = new Vector3(delta.x, 0f, delta.z);
         float dist = flat.magnitude;
         if (dist > 3f) return; // a respawn teleport, not walking
@@ -93,13 +112,24 @@ public class FootstepNoise : NetworkBehaviour, IRoundResettable
         }
         else stride = 0f;
 
-        // Breathing: always, even standing still, but only audible very close.
-        if ((breathTimer -= dt) <= 0f)
-        {
-            breathTimer = breathInterval;
-            NoiseSystem.Emit(transform.position, Mathf.Lerp(breathRange, heavyBreathRange, heavy),
-                heavy > 0.05f ? "heavy breathing" : "breathing",
-                heavy > 0.05f ? SoundKind.HeavyBreathing : SoundKind.Breathing, OwnerClientId);
-        }
+        EmitBreathing(dt);
+    }
+
+    // Breathing: always, even standing still, but only audible very close. Holding the breath (in a locker) silences THIS noise and nothing
+    // else; a hidden player breathes extremely quietly; heavy breathing after a sprint stays more audible; fear raises the quiet breathing a little.
+    void EmitBreathing(float dt)
+    {
+        if ((breathTimer -= dt) > 0f) return;
+        breathTimer = breathInterval;
+        bool hidden = hiding != null && hiding.IsHidden;
+        float range = Mathf.Lerp(breathRange, heavyBreathRange, heavy);
+        if (hidden || (hiding != null && hiding.HoldingBreath))
+            range = HiddenBreathing.Range(hiding.HoldingBreath, heavy > 0.05f, breathRange, heavyBreathRange, hiddenBreathRange, hiddenFearBreathRange,
+                hidden && hiding.CreatureClose(fearDistance), hidden);
+        LastBreathRange = range;
+        LastBreathAt = Time.timeAsDouble;
+        if (range <= 0f) return; // holding the breath: nothing to hear
+        NoiseSystem.Emit(transform.position, range, heavy > 0.05f ? "heavy breathing" : "breathing",
+            heavy > 0.05f ? SoundKind.HeavyBreathing : SoundKind.Breathing, OwnerClientId);
     }
 }

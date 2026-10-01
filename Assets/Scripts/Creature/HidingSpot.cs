@@ -22,6 +22,9 @@ public class HidingSpot : MonoBehaviour
     [Tooltip("Centre of the space under the furniture, at floor level")] public Transform lookAt;
     [Tooltip("Floor footprint (x, z) of the furniture in metres, used to recognise a player seen crawling under it")] public Vector2 footprint = new(1.8f, 1.3f);
 
+    [Header("Enclosed hiding (a locker; empty for furniture)")]
+    [Tooltip("The locker whose door the creature opens to inspect this spot. It is used only to open and close the door: the creature never reads who is inside.")] public HideLocker locker;
+
     [Header("Concealment volume (local space, drawn in the Scene view)")]
     [Tooltip("Set by Alien > Update Hiding Volumes. Untick it to have the volume regenerated from the footprint.")] public bool volumeConfigured;
     public Vector3 volumeCenter = new(0f, 0.575f, 0f);

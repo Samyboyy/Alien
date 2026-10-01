@@ -222,6 +222,7 @@ public class CreatureAudio : MonoBehaviour
                 PlayMouth(entryMouth, ai.VentEntryId, enterClip, bank.ventEnterVolume, enterFallback ? bank.ventEnterFallbackPitch : 1f, 0f);
                 break;
             case VentPhase.Travelling:
+                if (previous == VentPhase.Preparing) exitMouth.pool.StopAll(); // re-routed while waiting at an exit: that exit's warning ends, only the new exit warns
                 StartTravel();
                 break;
             case VentPhase.Preparing:

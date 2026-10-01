@@ -51,6 +51,7 @@ public class NetworkFirstPersonController : NetworkBehaviour
     readonly StaminaModel stamina = new();
     CharacterController cc;
     PlayerLife life; // null-tolerant: prefab may predate the round system
+    PlayerHiding hiding; // null-tolerant: hidden players do not walk
     float pitch, velocityY, height;
     bool cursorCaptured, needsTeleport;
 
@@ -58,6 +59,7 @@ public class NetworkFirstPersonController : NetworkBehaviour
     {
         cc = GetComponent<CharacterController>();
         life = GetComponent<PlayerLife>();
+        hiding = GetComponent<PlayerHiding>();
         height = standHeight;
         ApplyHeight(true);
     }
@@ -119,6 +121,20 @@ public class NetworkFirstPersonController : NetworkBehaviour
     // Dead or escaped: out of play (no movement, no collider).
     bool Dead => life != null && !life.IsAlive;
 
+    /// <summary>Inside a locker: no walking, sprinting or crouching, and the view is limited (PlayerHiding).</summary>
+    bool Hidden => hiding != null && hiding.IsHidden;
+
+    /// <summary>Owner: snaps the player to a place (a locker's anchors), cancelling any fall. Replicated like the respawn teleport.</summary>
+    public void TeleportTo(Vector3 position, Quaternion rotation)
+    {
+        cc.enabled = false;
+        transform.SetPositionAndRotation(position, rotation);
+        GetComponent<NetworkTransform>().Teleport(position, rotation, transform.localScale);
+        cc.enabled = !Dead;
+        velocityY = 0f;
+        pitch = 0f;
+    }
+
     public bool IsCrouched => crouched.Value;
 
     /// <summary>Owner only: the cursor is locked for gameplay (not in a menu).</summary>
@@ -176,6 +192,11 @@ public class NetworkFirstPersonController : NetworkBehaviour
     void HandleMovement()
     {
         if (Dead) return; // dead players cannot move; LocalSpectator drives the camera
+        if (Hidden)
+        {
+            if (crouched.Value) crouched.Value = false; // no stance changes in a locker (the stance never flickers)
+            return; // PlayerHiding drives the limited view
+        }
         var kb = Keyboard.current;
         var mouse = Mouse.current;
         Vector3 input = Vector3.zero;

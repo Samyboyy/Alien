@@ -154,6 +154,12 @@ public static class AudioSetup
             FromDefault("monsterFootstepVolume", 1f, 0.9f, 4);
             version.intValue = 4;
         }
+        if (version.intValue < 5)
+        {
+            // The noisemaker pulse carried a little too short at long range: its audible (not logical) maximum distance goes from 30 m to 40 m.
+            FromDefault("noisemakerMaxDistance", 30f, 40f, 5);
+            version.intValue = 5;
+        }
         return changed;
     }
 

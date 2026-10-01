@@ -14,6 +14,7 @@ using UnityEngine;
 public class LocalAmbience : MonoBehaviour
 {
     NetworkFirstPersonController controller;
+    PlayerHiding hiding;
     PlayerLife life;
     AudioBank bank;
     AudioSource heartSource, scaredSource, runSource;
@@ -30,6 +31,7 @@ public class LocalAmbience : MonoBehaviour
         bank = AudioBank.Get();
         controller = GetComponent<NetworkFirstPersonController>();
         life = GetComponent<PlayerLife>();
+        hiding = GetComponent<PlayerHiding>();
         if (bank == null) { enabled = false; return; }
 
         if (bank.tensionRiser != null) riser = new TensionRiser(bank, gameObject);
@@ -144,7 +146,8 @@ public class LocalAmbience : MonoBehaviour
         lowStamina = spell;
         bool chased = creature != null && creature.IsChasing(controller.OwnerClientId);
         scared = heartLevel >= (scared ? bank.scaredOff : bank.scaredOn) || chased;
-        var desired = on ? AudioRules.DesiredBreath(lowStamina, scared) : BreathKind.None;
+        bool holdingBreath = hiding != null && hiding.HoldingBreath; // holding the breath in a locker: no breathing to hear
+        var desired = on && !holdingBreath ? AudioRules.DesiredBreath(lowStamina, scared) : BreathKind.None;
         breath.Tick(desired, dt, bank.breathFadeIn, bank.breathFadeOut);
 
         float inner = AudioRouting.Volume(AudioCategory.Internal);

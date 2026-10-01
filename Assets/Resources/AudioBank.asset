@@ -1345,6 +1345,18 @@ MonoBehaviour:
   trackerRemoteVolume: 0.6
   trackerRemoteFullDistance: 2
   trackerRemoteMaxDistance: 18
+  noisemakerPickup: {fileID: 0}
+  noisemakerThrow: {fileID: 0}
+  noisemakerImpact: {fileID: 0}
+  noisemakerPulse: {fileID: 0}
+  noisemakerSpent: {fileID: 0}
+  noisemakerPickupVolume: 0.6
+  noisemakerThrowVolume: 0.5
+  noisemakerImpactVolume: 0.8
+  noisemakerPulseVolume: 0.7
+  noisemakerSpentVolume: 0.5
+  noisemakerFullDistance: 3
+  noisemakerMaxDistance: 40
   acousticProfiles:
   - space: 0
     room: -10000
@@ -1579,7 +1591,7 @@ MonoBehaviour:
     machineryToneLevel: 0
     ductToneLevel: 1
   fallbackSpace: 3
-  tuningVersion: 4
+  tuningVersion: 5
   engageLinger: 3
   heartbeatNear: 3
   heartbeatFar: 11

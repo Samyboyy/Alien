@@ -45,6 +45,7 @@ public class PlayerInventory : NetworkBehaviour, IRoundResettable
     void DropRpc(RpcParams rpcParams = default)
     {
         if (rpcParams.Receive.SenderClientId != OwnerClientId || !Alive || held == null || Time.time < nextDropTime) return;
+        if (TryGetComponent(out PlayerHiding hiding) && hiding.IsHidden) return; // objective items stay put while hiding
         nextDropTime = Time.time + dropCooldown;
         DropHeld(DropPoint());
         NoiseSystem.Emit(transform.position, dropNoise, "item drop", SoundKind.Impact, OwnerClientId);

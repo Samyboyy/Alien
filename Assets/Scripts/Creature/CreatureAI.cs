@@ -218,7 +218,7 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
                 UpdateBash();
                 break;
             default: // Patrol, Search, Investigate, Pursue: sight first, then hearing, then (when it wants one) a vent
-                if (tick && (Acquire() || Hear())) return;
+                if (tick && (Acquire() || Hear() || TickDecoy())) return;
                 if (TickVentDesire()) return;
                 if (state.Value == CreatureState.Patrol) UpdatePatrol();
                 else UpdateSearch();
@@ -249,6 +249,7 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
         evidenceStrength = strength;
         evidenceEmitter = emitter;
         evidenceCrouched = crouched;
+        evidenceToken = 0; // anything but a decoy (Hear tags it afterwards)
         evidenceTime = Time.timeAsDouble;
         if (emitter != NoiseSystem.NoEmitter)
         {
@@ -263,6 +264,7 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
         evidenceKind = EvidenceKind.None;
         evidenceEmitter = NoiseSystem.NoEmitter;
         evidenceCrouched = false;
+        evidenceToken = 0;
     }
 
     float SpeedFor(CreatureState s) =>
@@ -321,9 +323,11 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
         HidingSpot inspected = InspectingOpening(Sight(p.OwnerClientId).spot) ? Sight(p.OwnerClientId).spot : null; // before the search state is cleared
         SetEvidence(EvidenceKind.Sight, p.transform.position, 1f, p.OwnerClientId, p.IsCrouched);
         alertness = 1f;
+        var keepOpen = DetachLockerForChase(inspected); // it found someone through the open door: that door stays open until the chase is over
         ClearSearch(); // a confirmed sighting: old search history no longer applies
+        chaseLocker = keepOpen;
         chaseInspectSpot = inspected;
-        if (state.Value == CreatureState.Vent) CancelVent("sighted a player"); // only possible before it has committed
+        if (state.Value == CreatureState.Vent && !CancelVentAttemptForEvidence("direct sight of a player")) return false; // only possible before it has committed
         EnterChase(p, inspected != null ? $"found a player inspecting {inspected.name}" : "recognised a player");
         agent.SetDestination(evidencePos);
         return true;
@@ -345,6 +349,7 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
         bool found = false, pickPursued = false;
         NoiseSystem.Noise pick = default;
         float pickStrength = 0f, pickKey = -1f;
+        var pickAction = VentEvidenceAction.Cancel; // only meaningful while a vent trip is under way (HearMode.PreVent / Pending)
         foreach (var n in NoiseSystem.Recent)
         {
             if (n.id > newest) newest = n.id;
@@ -357,10 +362,21 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
             if (strength < minStrength) continue;
 
             bool pursued = trail && n.IsPlayerSound && n.emitter == evidenceEmitter;
-            if (!EscapeRules.AcceptNoise(curScore, trail, pursued, !n.IsPlayerSound, strength, switchMargin, cooldownOver)) continue;
+            // A noisemaker's sound has its own rule (DecoyRules): sight and a fresh trail outrank it, a recognised device is ignored.
+            bool ok = n.token != 0 ? DecoyHeard(n.token, curScore, trail, strength, cooldownOver, now)
+                : EscapeRules.AcceptNoise(curScore, trail, pursued, !n.IsPlayerSound, strength, switchMargin, cooldownOver);
+            if (!ok) continue;
 
+            // During a vent trip every accepted sound is first weighed by the vent rule: it may cancel the trip, be held for the next decision,
+            // or be ignored (weak, distant, a door, machinery, old).
+            var action = VentEvidenceAction.Cancel;
+            if (mode != HearMode.Act)
+            {
+                action = VentActionFor(n, strength, straight, now, pursued, trail, curScore);
+                if (action == VentEvidenceAction.Ignore) continue;
+            }
             float key = strength + (pursued ? 2f : 0f);
-            if (key >= pickKey) { found = true; pick = n; pickStrength = strength; pickKey = key; pickPursued = pursued; }
+            if (key >= pickKey) { found = true; pick = n; pickStrength = strength; pickKey = key; pickPursued = pursued; pickAction = action; }
         }
         handledNoiseId = newest; // everything seen this tick is consumed, accepted or not
         if (!found) return false;
@@ -380,14 +396,23 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
         lastSoundStrength = pickStrength;
         lastSoundTime = now;
         alertness = Mathf.Max(alertness, 0.5f + 0.5f * pickStrength); // heard something: more alert, never told where anyone is
-        if (mode == HearMode.Pending)
+        bool cancelsTrip = mode == HearMode.PreVent && pickAction == VentEvidenceAction.Cancel;
+        if (mode == HearMode.Pending || (mode == HearMode.PreVent && !cancelsTrip))
         {
-            // Inside a duct: the best sound is held until the next junction, where a turn is possible (CreatureAI.Vent.cs).
-            OfferPendingSound(pos, pickStrength, pick.IsPlayerSound ? pick.emitter : NoiseSystem.NoEmitter, pickPursued, now);
-            return true;
+            // In the duct, or not enough to give the trip up: the best sound is held for the next decision (CreatureAI.Vent.cs).
+            OfferPendingSound(pos, pickStrength, pick.IsPlayerSound ? pick.emitter : NoiseSystem.NoEmitter, pickPursued, now, pick.token, pick.kind);
+            return mode == HearMode.Pending;
+        }
+        if (cancelsTrip && !CancelVentAttemptForEvidence($"fresh {VentKindText(pick, pickPursued)} evidence"))
+        {
+            OfferPendingSound(pos, pickStrength, pick.IsPlayerSound ? pick.emitter : NoiseSystem.NoEmitter, pickPursued, now, pick.token, pick.kind);
+            return false;
         }
         if (!pickPursued) lastSwitchTime = now;
+        var before = pick.token != 0 ? Snapshot() : default;
+        bool followingDecoy = evidenceToken != 0;
         SetEvidence(EvidenceKind.Noise, pos, pickStrength, pick.IsPlayerSound ? pick.emitter : NoiseSystem.NoEmitter);
+        if (pick.token != 0) BeginDecoy(pick.token, before, followingDecoy);
 
         if (state.Value == CreatureState.Bash)
         {
@@ -491,6 +516,7 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
         ResetHunting();
         ResetVent(startPos, roundSeed ^ 0x5EED); // cancels any trip, restores collider, body and agent, clears cadence, history and held sounds
         ResetVocals(roundSeed ^ 0x0C41);
+        ResetDecoys(); // no recognised devices, no interest, nothing followed
         sights.Clear(); // every player's awareness and detection history
         lastSightTime = Time.timeAsDouble;
         chaseInspectSpot = null;
@@ -752,6 +778,7 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
                 SoundKind.Breathing or SoundKind.HeavyBreathing => Color.cyan,
                 SoundKind.Door => new Color(1f, 0.5f, 0f),
                 SoundKind.Impact => Color.magenta,
+                SoundKind.Electronic => new Color(1f, 0.55f, 0.1f),
                 _ => Color.white,
             };
             Gizmos.DrawWireSphere(n.position, n.loudness);
@@ -775,7 +802,7 @@ public partial class CreatureAI : NetworkBehaviour, IRoundResettable
             string dest = evidenceKind == EvidenceKind.None ? "-" : $"({evidencePos.x:0}, {evidencePos.z:0})";
             string snd = lastSound.id == 0 ? "-" : $"{lastSound.kind} {lastSoundStrength:0.00}, {now - lastSoundTime:0.0}s ago";
             string door = bashDoor == null ? "-" : $"{bashDoor.name} {memoProgress:0.0}/{doorWindup:0.0}s";
-            extra = $"\nwhy: {reason}\nsound: {snd}\nevidence: {ev}\ndest: {dest}\ndoor: {door}\nsearch: {SearchDebugText()}\nrooms: {RoomDebugText()}\nvent: {VentDebugText()}\nsight: {SightDebugText()}";
+            extra = $"\nwhy: {reason}\nsound: {snd}\nevidence: {ev}\ndecoy: {DecoyDebugText()}\nlocker: {LockerDebugText()}\ndest: {dest}\ndoor: {door}\nsearch: {SearchDebugText()}\nrooms: {RoomDebugText()}\nvent: {VentDebugText()}\nsight: {SightDebugText()}";
         }
         GUI.Label(new Rect(sp.x - 240, Screen.height - sp.y, 520, 300 + 16 * SightDebugLines), $"{state.Value}  alert: {alertLevel.Value}\ntarget: {who}{extra}");
     }

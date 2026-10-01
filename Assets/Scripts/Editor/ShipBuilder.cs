@@ -94,6 +94,8 @@ public static partial class ShipBuilder
         AddHidingAndRooms(); // survival additions: furniture, room volumes, search points (ShipSurvival.cs)
         AddCreatureVentilation(); // room connections with their doors, and the creature vent network (ShipVentilation.cs)
         AddShipAtmosphere(); // ceiling, lights, interior Volume and acoustic zones (ShipAtmosphereBuilder.cs)
+        AddNoisemakers(); // throwable noisemaker prefab, player inventory and pickups (ShipNoisemakers.cs)
+        AddLockers(); // enterable lockers, registered as hiding places in their rooms (ShipLockers.cs)
         CreatureSetup.GetOrCreateSurface();
         EditorSceneManager.SaveScene(scene);
 
@@ -114,7 +116,7 @@ public static partial class ShipBuilder
         try
         {
             bool changed = Ensure<PlayerInteractor>(root) | Ensure<PlayerLife>(root) | Ensure<LocalSpectator>(root)
-                | Ensure<PlayerInventory>(root) | Ensure<FootstepNoise>(root) | Ensure<ThreatVisuals>(root) | Ensure<PlayerMotionTracker>(root);
+                | Ensure<PlayerInventory>(root) | Ensure<FootstepNoise>(root) | Ensure<ThreatVisuals>(root) | Ensure<PlayerMotionTracker>(root) | Ensure<PlayerHiding>(root);
             if (!changed) return;
             PrefabUtility.SaveAsPrefabAsset(root, PrototypeSetup.PrefabPath);
             Debug.Log("Player prefab: added escape-system components.");

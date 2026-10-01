@@ -84,6 +84,7 @@ public partial class CreatureAI
     // fullHistory=false keeps what was already searched (used when evidence merely moves); true is a fresh start.
     void ClearSearch(bool fullHistory = true)
     {
+        ReleaseLocker(); // an unfinished locker inspection never leaves a door held open
         searchPhase = SearchPhase.Done;
         step = SearchStep.Travel;
         currentRoom = null;
@@ -206,7 +207,7 @@ public partial class CreatureAI
         if (hidingLeft)
             foreach (var h in currentRoom.hidingSpots)
                 if (h != null && !memory.PointChecked(h.GetInstanceID()))
-                    candidates.Add((Score(h.transform.position) - 3f, null, h));
+                    candidates.Add((HidingScore(h), null, h));
         candidates.Sort((a, b) => a.score.CompareTo(b.score));
 
         for (int i = 0; i < candidates.Count && i < 4; i++) // test only the best few for reachability
@@ -265,6 +266,11 @@ public partial class CreatureAI
         inspectTotal = inspectTimer = targetSpot != null ? hidingInspectSeconds : inspectPause;
         inspectingLow = targetSpot != null;
         yawBase = transform.eulerAngles.y;
+        if (targetSpot != null && targetSpot.locker != null)
+        {
+            inspectingLow = false; // set only while it is really looking into the open locker
+            BeginLockerInspect(targetSpot);
+        }
     }
 
     static readonly float[] sweep = { -50f, 50f, 0f }; // short changes of facing while looking around
@@ -285,6 +291,16 @@ public partial class CreatureAI
         }
         transform.rotation = Quaternion.RotateTowards(transform.rotation, want, 200f * Time.deltaTime);
 
+        if (lockerHeld != null)
+        {
+            // A locker has its own timeline (wind up, open, look, close); the usual timer does not apply to it.
+            if (!UpdateLockerInspect()) return;
+            inspectingLow = false;
+            hidingChecked++;
+            MarkTargetChecked();
+            NextTarget();
+            return;
+        }
         if (inspectTimer > 0f) return;
         inspectingLow = false;
         if (targetSpot != null) hidingChecked++; else pointsChecked++;
@@ -355,7 +371,7 @@ public partial class CreatureAI
         float cap = (searchPhase == SearchPhase.Local ? localSearchSeconds : nearbySearchSeconds) * scale;
         string room = currentRoom != null ? currentRoom.roomName : "none";
         string point = targetSpot != null ? $"hiding {targetSpot.name}" : targetPoint != null ? targetPoint.name : "-";
-        string doing = step == SearchStep.Inspect ? $"inspecting {inspectTimer:0.0}s" : "travelling";
+        string doing = step == SearchStep.Inspect ? (lockerHeld != null ? $"locker {lockerInspection.Stage}" : $"inspecting {inspectTimer:0.0}s") : "travelling";
         return $"{searchPhase} in {room}, {point} ({doing})\n  points {pointsChecked}/{PointBudget}, hiding {hidingChecked}/{HidingBudget}, rooms {roomsVisited}/{nearbyRooms}, {Mathf.Max(0f, cap - phaseTime):0}s left, alert {alertness:0.00}";
     }
 

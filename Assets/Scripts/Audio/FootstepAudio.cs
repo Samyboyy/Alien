@@ -12,6 +12,7 @@ public class FootstepAudio : MonoBehaviour
 {
     NetworkFirstPersonController controller;
     PlayerLife life;
+    PlayerHiding hiding; // no footsteps from a locker, and a snap in or out is not walking
     FootstepNoise tuning; // stride lengths and thresholds, shared with the logical footsteps
     AudioBank bank;
     SfxPool pool;
@@ -27,6 +28,7 @@ public class FootstepAudio : MonoBehaviour
         controller = GetComponent<NetworkFirstPersonController>();
         life = GetComponent<PlayerLife>();
         tuning = GetComponent<FootstepNoise>();
+        hiding = GetComponent<PlayerHiding>();
         if (bank == null) return;
         if (own)
         {
@@ -57,6 +59,7 @@ public class FootstepAudio : MonoBehaviour
         Vector3 delta = transform.position - last;
         last = transform.position;
         if (life != null && !life.IsAlive) { stride = speed = 0f; return; }
+        if (hiding != null && hiding.SuppressFootsteps) { stride = speed = 0f; return; }
 
         float dt = Mathf.Max(Time.deltaTime, 0.0001f);
         Vector3 flat = new Vector3(delta.x, 0f, delta.z);

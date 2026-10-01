@@ -2,6 +2,9 @@ using System.Collections.Generic;
 
 // Pure ventilation rules with no Unity types, so they can be unit tested (Editor/Tests/VentRulesTests.cs).
 
+/// <summary>The replicated stages of a creature vent trip (see CreatureAI.Vent.cs).</summary>
+public enum VentPhase : byte { None, Approaching, Entering, Travelling, Preparing, Exiting }
+
 /// <summary>
 /// The creature-only duct network as a graph: nodes are vent entrances (indices 0..N-1) and junctions, edges are authored duct
 /// runs with a real length in metres. Routes are shortest by length; ties go to the lower node index, so a route is deterministic.
@@ -332,5 +335,170 @@ public static class VentValidation
             if (!otherExit) r.problems.Add($"entrance {i} has no other entrance to reach");
         }
         return r;
+    }
+}
+
+// ---------- Vent commitment and evidence priority (pure; Editor/Tests/VentPriorityTests.cs) ----------
+
+/// <summary>
+/// How committed a vent trip is. THE COMMIT POINT is CommitVent(): the moment the agent and collider go off and the creature walks into the
+/// wall. Before it (approaching the mouth, the short wind-up at it) the trip is a plan and any important evidence cancels it; after it the
+/// creature is physically in the duct and can only change its route; once it starts to come out it finishes coming out.
+/// </summary>
+public enum VentCommitment : byte { None, Approaching, PreEntry, InDuct, Emerging }
+
+/// <summary>What a piece of evidence is, for the vent decision (the host classifies each heard sound; sight is classified by its own code).</summary>
+public enum VentEvidenceKind : byte { Incidental, Decoy, PlayerWalk, PlayerSprint, PlayerBreath, PlayerHeavyBreath, PlayerImpact, PursuedTrail, WitnessedHiding, DirectSight }
+
+public enum VentEvidenceAction : byte { Ignore, Store, Reroute, Cancel }
+
+public struct VentEvidenceTuning
+{
+    public float cancelSprintDistance, cancelWalkDistance, cancelBreathDistance, cancelImpactStrength, decoyCancelStrength, minStoreStrength, minCancelStrength, maxAgeSeconds;
+
+    public static VentEvidenceTuning Default => new()
+    {
+        cancelSprintDistance = 16f, cancelWalkDistance = 8f, cancelBreathDistance = 4f, cancelImpactStrength = 0.5f, decoyCancelStrength = 0.6f,
+        minStoreStrength = 0.15f, minCancelStrength = 0.25f, maxAgeSeconds = 1.5f,
+    };
+}
+
+public static class VentEvidenceRules
+{
+    /// <summary>
+    /// The one rule for what evidence does to a vent trip. Before the commit point: direct sight, a watched hiding-place entry and the fresh
+    /// trail of the player being pursued ALWAYS cancel it; a player's sprint nearby, close walking while hunting, close heavy breathing and a
+    /// strong player-made impact cancel it; a noisemaker only when no player evidence is held and it is strong; weak or distant sounds, doors,
+    /// machinery and spam never do (the stronger of those is kept for after the trip). In the duct the same evidence changes the intended exit
+    /// instead (Reroute) at the next legitimate decision. While emerging it is only stored. Old evidence is ignored.
+    /// </summary>
+    public static VentEvidenceAction Decide(VentCommitment commit, VentEvidenceKind kind, float strength, float ageSeconds, float distance, bool hunting,
+        bool playerEvidenceHeld, in VentEvidenceTuning t)
+    {
+        if (commit == VentCommitment.None) return VentEvidenceAction.Ignore;
+        if (ageSeconds > t.maxAgeSeconds || ageSeconds < 0f) return VentEvidenceAction.Ignore;
+        bool pre = commit is VentCommitment.Approaching or VentCommitment.PreEntry;
+
+        // Sight and its direct consequences outrank any plan before the commit point, whatever their strength or margin.
+        if (kind is VentEvidenceKind.DirectSight or VentEvidenceKind.WitnessedHiding or VentEvidenceKind.PursuedTrail)
+            return pre ? VentEvidenceAction.Cancel : commit == VentCommitment.InDuct ? VentEvidenceAction.Reroute : VentEvidenceAction.Store;
+
+        if (kind == VentEvidenceKind.Incidental || strength < t.minStoreStrength) return VentEvidenceAction.Ignore;
+
+        if (pre)
+        {
+            bool cancel = kind switch
+            {
+                VentEvidenceKind.PlayerSprint => distance <= t.cancelSprintDistance && strength >= t.minCancelStrength,
+                VentEvidenceKind.PlayerWalk => hunting && distance <= t.cancelWalkDistance && strength >= t.minCancelStrength,
+                VentEvidenceKind.PlayerHeavyBreath => distance <= t.cancelBreathDistance && strength >= t.minCancelStrength,
+                VentEvidenceKind.PlayerImpact => strength >= t.cancelImpactStrength,
+                VentEvidenceKind.Decoy => !playerEvidenceHeld && strength >= t.decoyCancelStrength,
+                _ => false,
+            };
+            if (cancel) return VentEvidenceAction.Cancel;
+            // Not enough to give up the trip: keep it for later unless it is hardly anything.
+            return kind == VentEvidenceKind.PlayerBreath || (kind == VentEvidenceKind.Decoy && playerEvidenceHeld) ? VentEvidenceAction.Ignore : VentEvidenceAction.Store;
+        }
+
+        if (commit == VentCommitment.InDuct)
+            return kind == VentEvidenceKind.Decoy && playerEvidenceHeld ? VentEvidenceAction.Store
+                : kind == VentEvidenceKind.PlayerBreath && distance > t.cancelBreathDistance ? VentEvidenceAction.Store
+                : VentEvidenceAction.Reroute;
+        return VentEvidenceAction.Store; // emerging: finish coming out, then act on it
+    }
+
+    /// <summary>Held evidence from a player is only usable while that player is still in play (alive, not escaped, connected); other sounds have no such condition.</summary>
+    public static bool Usable(bool fromPlayer, bool playerInPlay) => !fromPlayer || playerInPlay;
+
+    /// <summary>Maps the replicated phase (and whether the creature has committed) onto the commitment level.</summary>
+    public static VentCommitment CommitmentOf(VentPhase phase, bool committed) => phase switch
+    {
+        VentPhase.Approaching => VentCommitment.Approaching,
+        VentPhase.Entering => committed ? VentCommitment.InDuct : VentCommitment.PreEntry,
+        VentPhase.Travelling or VentPhase.Preparing => VentCommitment.InDuct,
+        VentPhase.Exiting => VentCommitment.Emerging,
+        _ => VentCommitment.None,
+    };
+}
+
+/// <summary>
+/// One trip as a small state machine, so its transitions are checked in one place: it can be cancelled only before the commit point, a
+/// cancelled attempt starts a retry cooldown (so the same vent is not picked again at once) and never counts as a trip, a late callback
+/// cannot commit a trip that was cancelled, and a committed trip can only change its exit (a bounded number of times).
+/// </summary>
+public sealed class VentAttempt
+{
+    public VentPhase Phase { get; private set; }
+    public bool Committed { get; private set; }
+    public int Entry { get; private set; } = -1;
+    public int Exit { get; private set; } = -1;
+    public int Reroutes { get; private set; }
+    public double RetryUntil { get; private set; } = double.NegativeInfinity;
+    public int Cancelled { get; private set; }
+
+    public bool Active => Entry >= 0;
+    public VentCommitment Commitment => VentEvidenceRules.CommitmentOf(Phase, Committed);
+    public bool Interruptible => Commitment is VentCommitment.Approaching or VentCommitment.PreEntry;
+
+    public bool MayBegin(double now) => !Active && now >= RetryUntil;
+
+    public bool Begin(int entry, int exit, double now)
+    {
+        if (!MayBegin(now) || entry < 0 || exit < 0) return false;
+        Entry = entry;
+        Exit = exit;
+        Committed = false;
+        Reroutes = 0;
+        Phase = VentPhase.Approaching;
+        return true;
+    }
+
+    public void SetPhase(VentPhase phase) => Phase = phase;
+
+    /// <summary>The commit point. False when the attempt is not at the mouth any more (cancelled, reset, or already committed): a stale call does nothing.</summary>
+    public bool Commit()
+    {
+        if (!Active || Committed || Phase != VentPhase.Entering) return false;
+        Committed = true;
+        return true;
+    }
+
+    /// <summary>Cancels a trip that has not committed. False (nothing changes) once it has.</summary>
+    public bool Cancel(double now, float retrySeconds)
+    {
+        if (!Active || Committed) return false;
+        Clear();
+        RetryUntil = now + System.Math.Max(0f, retrySeconds);
+        Cancelled++;
+        return true;
+    }
+
+    /// <summary>Changes the intended exit of a committed trip, at most <paramref name="maxReroutes"/> times. False when not allowed or not different.</summary>
+    public bool Reroute(int newExit, int maxReroutes)
+    {
+        if (!Active || !Committed || newExit < 0 || newExit == Exit || Reroutes >= maxReroutes) return false;
+        Exit = newExit;
+        Reroutes++;
+        return true;
+    }
+
+    /// <summary>A completed trip (no retry cooldown: the ordinary cadence applies).</summary>
+    public void Finish() => Clear();
+
+    /// <summary>Round reset: everything, including the retry cooldown.</summary>
+    public void Reset()
+    {
+        Clear();
+        RetryUntil = double.NegativeInfinity;
+        Cancelled = 0;
+    }
+
+    void Clear()
+    {
+        Phase = VentPhase.None;
+        Committed = false;
+        Entry = Exit = -1;
+        Reroutes = 0;
     }
 }

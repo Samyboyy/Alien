@@ -3,7 +3,7 @@ using Unity.Netcode;
 using UnityEngine;
 
 /// <summary>What made a logical noise event. Only used by the creature's hearing and the debug display.</summary>
-public enum SoundKind : byte { Other, SprintStep, WalkStep, CrouchStep, Breathing, HeavyBreathing, Door, Impact, Tracker }
+public enum SoundKind : byte { Other, SprintStep, WalkStep, CrouchStep, Breathing, HeavyBreathing, Door, Impact, Tracker, Electronic }
 
 /// <summary>
 /// Host-only record of recent LOGICAL noise events for AI perception (nothing here is audible to players; there are no
@@ -26,6 +26,7 @@ public static class NoiseSystem
         public string source;
         public SoundKind kind;
         public ulong emitter; // owning client id of the player who made it, or NoEmitter
+        public ulong token; // identity of a non-player source that can be recognised for what it is (a thrown noisemaker); 0 = none
 
         /// <summary>Footsteps, breathing and motion-tracker beeps of a player: a trail of that player. Doors, impacts and consoles are incidental.</summary>
         public bool IsPlayerSound => emitter != NoEmitter && emitter != CreatureEmitter
@@ -41,7 +42,7 @@ public static class NoiseSystem
     public static ulong LastId => lastId;
 
     /// <summary>Host only; ignored on clients and for loudness &lt;= 0.</summary>
-    public static void Emit(Vector3 position, float loudness, string source, SoundKind kind = SoundKind.Other, ulong emitter = NoEmitter)
+    public static void Emit(Vector3 position, float loudness, string source, SoundKind kind = SoundKind.Other, ulong emitter = NoEmitter, ulong token = 0)
     {
         var nm = NetworkManager.Singleton;
         if (loudness <= 0f || nm == null || !nm.IsServer) return;
@@ -55,6 +56,7 @@ public static class NoiseSystem
             source = source,
             kind = kind,
             emitter = emitter,
+            token = token,
         });
     }
 

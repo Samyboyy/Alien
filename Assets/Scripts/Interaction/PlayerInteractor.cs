@@ -38,6 +38,7 @@ public class PlayerInteractor : NetworkBehaviour
     }
 
     bool Dead => life != null && !life.IsAlive;
+    bool Hidden => TryGetComponent(out PlayerHiding h) && h.IsHidden; // hidden players interact with nothing outside the locker
     static bool RoundOver => RoundManager.Instance != null && RoundManager.Instance.State == RoundState.Over;
 
     void Update()
@@ -52,7 +53,7 @@ public class PlayerInteractor : NetworkBehaviour
         targetInteractable = null;
         prompt = null;
         // No interaction while the cursor is free (menu in use) or when out of play.
-        if (!Dead && Cursor.lockState == CursorLockMode.Locked)
+        if (!Dead && !Hidden && Cursor.lockState == CursorLockMode.Locked)
         {
             var cam = player.playerCamera.transform;
             if (Physics.Raycast(cam.position, cam.forward, out var hit, interactRange,
@@ -86,7 +87,7 @@ public class PlayerInteractor : NetworkBehaviour
     void InteractRpc(NetworkObjectReference target, RpcParams rpcParams = default)
     {
         // InvokePermission already limits senders to this player's owner; check anyway.
-        if (rpcParams.Receive.SenderClientId != OwnerClientId || Dead || RoundOver) return; // dead players cannot interact
+        if (rpcParams.Receive.SenderClientId != OwnerClientId || Dead || RoundOver || Hidden) return; // dead or hidden players cannot interact
         if (Time.time < nextRequestTime) return;
         nextRequestTime = Time.time + requestCooldown;
         if (!target.TryGet(out var obj, NetworkManager) || !obj.TryGetComponent(out IInteractable interactable)) return;
@@ -110,7 +111,7 @@ public class PlayerInteractor : NetworkBehaviour
     void UpdateHold()
     {
         if (holdObject == null) return;
-        if (Dead || RoundOver || !holdObject.IsSpawned || !InReach(holdObject) || !holdTarget.CanInteract(player))
+        if (Dead || RoundOver || Hidden || !holdObject.IsSpawned || !InReach(holdObject) || !holdTarget.CanInteract(player))
         {
             CancelHold();
             return;

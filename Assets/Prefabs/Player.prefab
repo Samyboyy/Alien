@@ -202,6 +202,8 @@ GameObject:
   - component: {fileID: 7393328312955687101}
   - component: {fileID: 3188594096239349523}
   - component: {fileID: 1483427648982236349}
+  - component: {fileID: 1107328714247090813}
+  - component: {fileID: 2996902435708253998}
   m_Layer: 0
   m_Name: Player
   m_TagString: Untagged
@@ -440,6 +442,9 @@ MonoBehaviour:
   moveSpeed: 0.6
   maxGroundedVerticalSpeed: 3
   sampleInterval: 0.5
+  hiddenBreathRange: 0.5
+  hiddenFearBreathRange: 1.2
+  fearDistance: 6
 --- !u!114 &3188594096239349523
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -500,3 +505,49 @@ MonoBehaviour:
   hostMinBeepInterval: 0.25
   dialSize: 0.26
   blipFade: 2.4
+--- !u!114 &1107328714247090813
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9133172698758382489}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a3d2d1488d809ed47b94cfdee10416ee, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerNoisemakers
+  ShowTopMostFoldoutHeaderGroup: 1
+  capacity: 2
+  startingCount: 0
+  devicePrefab: {fileID: 3719028581055312669, guid: f8a24877e9e3d844da75831b8378a562, type: 3}
+  cooldown: 1.2
+  throwSpeed: 9
+  upwardBias: 0.12
+  spawnForward: 0.5
+  maxYawError: 25
+  minPitch: -50
+  maxPitch: 60
+  handlingNoise: 3
+  maxActiveDevices: 8
+--- !u!114 &2996902435708253998
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9133172698758382489}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7184c18f6b0cc164898a17292cc322d2, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerHiding
+  ShowTopMostFoldoutHeaderGroup: 1
+  holdSeconds: 5
+  recoverDelay: 1.2
+  recoverSeconds: 7
+  minToHold: 0.3
+  minTransitionGap: 0.25
+  gaspTriggerDistance: 10
+  gaspRange: 6
+  cameraBlendSeconds: 0.35

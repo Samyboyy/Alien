@@ -159,6 +159,10 @@ public static class PrototypeSetup
             PlayerPrefab = playerPrefab,
             ConnectionApproval = true,
         };
+        // A manager only registers the prefabs of the lists it references. Without this the player prefab (registered separately) is the only
+        // network prefab it knows, and anything spawned at run time (the thrown noisemaker) fails with "not a registered network prefab".
+        var prefabList = AssetDatabase.LoadAssetAtPath<NetworkPrefabsList>("Assets/DefaultNetworkPrefabs.asset");
+        if (prefabList != null) nm.NetworkConfig.Prefabs.NetworkPrefabsLists.Add(prefabList);
         var ui = net.AddComponent<ConnectionUI>();
         ui.networkManager = nm;
         ui.lobbyCamera = lobbyCam;

@@ -152,6 +152,8 @@ public partial class CreatureAI
             cover = s.inspected ? Mathf.Lerp(referenceCover, s.spot.visualConcealment, s.spot.inspectionResidual) : s.spot.visualConcealment;
             light = s.inspected ? Mathf.Max(s.spot.lightVisibility, 1f) : s.spot.lightVisibility; // inspecting with a light
             baseSeconds = SightRules.ConcealedSeconds(AttentionSeconds(s.attention), cover, referenceCover, recogniseSeconds);
+            // It watched this very player go into this spot and has come to open it: no hesitation (still never faster than in the open).
+            if (s.inspected && s.spot == s.memorySpot) baseSeconds = Mathf.Max(recogniseSeconds, baseSeconds * witnessedInspectFactor);
         }
         float exposure = s.samples / (float)bodySamples.Length;
         s.rate = SightRules.Rate(exposure, dist, angle, sightDistance, fieldOfView, closeSenseDistance, 0f, light,
@@ -202,6 +204,8 @@ public partial class CreatureAI
         witnessedSpot = s.spot;
         // Already chasing: losing sight later sends it to this spot (NoteWitnessedSpot). Otherwise go and look now.
         if (!active || state.Value == CreatureState.Chase || state.Value == CreatureState.Bash) return;
+        // Before it has committed to a vent, a hiding place it watched somebody enter always cancels the trip; in the duct it cannot see at all.
+        if (state.Value == CreatureState.Vent && !CancelVentAttemptForEvidence("watched a player enter a hiding place")) return;
         SetEvidence(EvidenceKind.Sight, s.spot.LookPoint, 0.7f, p.OwnerClientId, true);
         EnterSearch(CreatureState.Investigate, $"saw a player enter {s.spot.name}");
     }
